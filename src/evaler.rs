@@ -122,8 +122,13 @@ impl Evaler for Instruction {
                 dst.insert(s.clone());
             }
 
-            IFunc(name, ..) => {
+            IFunc(name, _, nic) => {
                 dst.insert(name.clone());
+                for ic in nic {
+                    if let IC::I(i) = ic {
+                        oast.get(*i)._var_names(oast, dst);
+                    }
+                }
             }
 
             IFunc_1F(_, ii) => {
