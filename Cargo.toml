@@ -1,0 +1,44 @@
+[package]
+name = "expre"
+version = "0.1.0"
+authors = ["Alexander Antoshuk <alexander.antoshuk@gmail.com>"]
+license = "MIT"
+readme = "README.md"
+repository = "https://github.com/alexantoshuk/expre"
+documentation = "https://docs.rs/expre/"
+description = """Fast evaluation of algebraic expressions"""
+keywords = ["evaluate", "math", "algebra", "calculate", "expression"]
+categories = ["mathematics", "science", "parser-implementations"]
+edition = "2021"
+
+[profile.bench]
+# debug = true
+opt-level = 3
+lto = true
+panic = "abort"
+codegen-units = 1
+
+[profile.release]
+opt-level = 3
+panic = "abort"
+codegen-units = 1
+lto = "fat"
+
+[dependencies]
+dyn-fmt = "^0.4"
+num-traits = "^0.2"
+
+
+[dev-dependencies]
+criterion = { version = "^0.5", features = ["html_reports"] }
+
+
+[[bench]]
+name = "bench"
+harness = false
+
+
+[features]
+default = ["alpha-keywords"]
+alpha-keywords = []          # Enable 'NaN', 'inf', 'and', 'or'
+unsafe-vars = []             # tinyexpr-style pointer-based variables.
