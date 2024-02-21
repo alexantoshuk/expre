@@ -31,9 +31,8 @@ use crate::parser::AST;
 use crate::parser::{
     BinaryOp::{self, *},
     Expr, ExprPair,
-    StdFunc::{self, *},
     UnaryOp::{self, *},
-    Value,
+    Value::{self, *},
 };
 use crate::write_indexed_list;
 use std::fmt;
@@ -181,9 +180,9 @@ pub enum Instruction {
     },
     // IFunc(String, Vec<IC>),
     IFunc(String, Vec<String>, Vec<IC>),
-    IFunc_f(fn(f64) -> f64, usize),
-    IFunc_f_f(fn(f64, f64) -> f64, IC, IC),
-    IFunc_s_nf(fn(&str, Vec<f64>) -> f64, String, Vec<IC>),
+    IFunc_1F(fn(f64) -> f64, usize),
+    IFunc_2F(fn(f64, f64) -> f64, IC, IC),
+    IFunc_1S_NF(fn(&str, Vec<f64>) -> f64, String, Vec<IC>),
 
     IMin(usize, IC),
     IMax(usize, IC),
@@ -652,15 +651,13 @@ impl Compiler for Expr {
     }
 }
 
-impl Compiler for Value {
-    fn compile(&self, ast: &AST, oast: &mut OAST) -> Instruction {
-        match self {
-            Value::EConst(c) => IConst(*c),
-            Value::EUnaryOp(u) => u.compile(ast, oast),
-            Value::EStdFunc(f) => f.compile(ast, oast),
-        }
-    }
-}
+// impl Compiler for Value {
+//     fn compile(&self, ast: &AST, oast: &mut OAST) -> Instruction {
+//         match self {
+//             Value::EStdFunc(f) => f.compile(ast, oast),
+//         }
+//     }
+// }
 
 impl Compiler for UnaryOp {
     fn compile(&self, ast: &AST, oast: &mut OAST) -> Instruction {
@@ -687,112 +684,11 @@ impl Compiler for UnaryOp {
     }
 }
 
-impl Compiler for StdFunc {
+impl Compiler for Value {
     fn compile(&self, ast: &AST, oast: &mut OAST) -> Instruction {
         match self {
-            EMin {
-                first: fi,
-                rest: is,
-            } => {
-                let first = ast.get_expr(*fi).compile(ast, oast);
-                let mut rest = Vec::<Instruction>::with_capacity(is.len());
-                for i in is {
-                    rest.push(ast.get_expr(*i).compile(ast, oast));
-                }
-                let mut out = IConst(0.0);
-                let mut out_set = false;
-                let mut const_min = 0.0;
-                let mut const_min_set = false;
-                if let IConst(f) = first {
-                    const_min = f;
-                    const_min_set = true;
-                } else {
-                    out = first;
-                    out_set = true;
-                }
-                for instr in rest {
-                    if let IConst(f) = instr {
-                        if const_min_set {
-                            const_min = const_min.min(f)
-                            // if f < const_min {
-                            //     const_min = f;
-                            // }
-                        } else {
-                            const_min = f;
-                            const_min_set = true;
-                        }
-                    } else {
-                        if out_set {
-                            out = IMin(oast.push(out), IC::I(oast.push(instr)));
-                        } else {
-                            out = instr;
-                            out_set = true;
-                        }
-                    }
-                }
-                if const_min_set {
-                    if out_set {
-                        out = IMin(oast.push(out), IC::C(const_min));
-                    } else {
-                        out = IConst(const_min);
-                        // out_set = true;  // Comment out so the compiler doesn't complain about unused assignments.
-                    }
-                }
-                //assert!(out_set);
-                out
-            }
-
-            EMax {
-                first: fi,
-                rest: is,
-            } => {
-                let first = ast.get_expr(*fi).compile(ast, oast);
-                let mut rest = Vec::<Instruction>::with_capacity(is.len());
-                for i in is {
-                    rest.push(ast.get_expr(*i).compile(ast, oast));
-                }
-                let mut out = IConst(0.0);
-                let mut out_set = false;
-                let mut const_max = 0.0;
-                let mut const_max_set = false;
-                if let IConst(f) = first {
-                    const_max = f;
-                    const_max_set = true;
-                } else {
-                    out = first;
-                    out_set = true;
-                }
-                for instr in rest {
-                    if let IConst(f) = instr {
-                        if const_max_set {
-                            const_max = const_max.max(f);
-                            // if f > const_max {
-                            //     const_max = f;
-                            // }
-                        } else {
-                            const_max = f;
-                            const_max_set = true;
-                        }
-                    } else {
-                        if out_set {
-                            out = IMax(oast.push(out), IC::I(oast.push(instr)));
-                        } else {
-                            out = instr;
-                            out_set = true;
-                        }
-                    }
-                }
-                if const_max_set {
-                    if out_set {
-                        out = IMax(oast.push(out), IC::C(const_max));
-                    } else {
-                        out = IConst(const_max);
-                        // out_set = true;  // Comment out so the compiler doesn't complain about unused assignments.
-                    }
-                }
-                //assert!(out_set);
-                out
-            }
+            EConst(c) => IConst(*c),
+            EUnaryOp(u) => u.compile(ast, oast),
 
             EVar(name) => {
                 if let Some(c) = builtins::constant(name) {
@@ -807,58 +703,120 @@ impl Compiler for StdFunc {
                 ptr: *ptr,
             },
 
-            // EFunc { name, args } => {
-            //     match args.as_slice() {
-            //         [arg] => {
-            //             if let Some(f) = builtins::func_f(name) {
-            //                 let instr = ast.get_expr(*arg).compile(ast, oast);
-            //                 return {
-            //                     if let IConst(c) = instr {
-            //                         IConst(f(c))
-            //                     } else {
-            //                         IFunc_f(f, oast.push(instr))
-            //                     }
-            //                 };
-            //             }
-            //         }
-            //         [arg0, arg1] => {
-            //             if let Some(f) = builtins::func_f_f(name) {
-            //                 let instr0 = ast.get_expr(*arg0).compile(ast, oast);
-            //                 let instr1 = ast.get_expr(*arg1).compile(ast, oast);
-            //                 return {
-            //                     if let (IConst(c0), IConst(c1)) = (&instr0, &instr1) {
-            //                         IConst(f(*c0, *c1))
-            //                     } else {
-            //                         IFunc_f_f(f, oast.instr_to_ic(instr0), oast.instr_to_ic(instr1))
-            //                     }
-            //                 };
-            //             }
-            //         }
-            //         _ => (),
-            //     }
-
-            //     let mut iargs = Vec::<IC>::with_capacity(args.len());
-            //     for i in args {
-            //         let instr = ast.get_expr(*i).compile(ast, oast);
-            //         iargs.push(oast.instr_to_ic(instr));
-            //     }
-            //     IFunc(name.clone(), iargs)
-            // }
             EFunc { name, sargs, args } => {
-                match (sargs.as_slice(), args.as_slice()) {
-                    ([], [arg]) => {
+                match (name.as_str(), sargs.as_slice(), args.as_slice()) {
+                    //Special case for 'min' function
+                    ("min", [], [fi, is @ ..]) => {
+                        let first = ast.get_expr(*fi).compile(ast, oast);
+                        let mut rest = Vec::<Instruction>::with_capacity(is.len());
+                        for i in is {
+                            rest.push(ast.get_expr(*i).compile(ast, oast));
+                        }
+                        let mut out = IConst(0.0);
+                        let mut out_set = false;
+                        let mut const_min = 0.0;
+                        let mut const_min_set = false;
+                        if let IConst(f) = first {
+                            const_min = f;
+                            const_min_set = true;
+                        } else {
+                            out = first;
+                            out_set = true;
+                        }
+                        for instr in rest {
+                            if let IConst(f) = instr {
+                                if const_min_set {
+                                    const_min = const_min.min(f)
+                                    // if f < const_min {
+                                    //     const_min = f;
+                                    // }
+                                } else {
+                                    const_min = f;
+                                    const_min_set = true;
+                                }
+                            } else {
+                                if out_set {
+                                    out = IMin(oast.push(out), IC::I(oast.push(instr)));
+                                } else {
+                                    out = instr;
+                                    out_set = true;
+                                }
+                            }
+                        }
+                        if const_min_set {
+                            if out_set {
+                                out = IMin(oast.push(out), IC::C(const_min));
+                            } else {
+                                out = IConst(const_min);
+                                // out_set = true;  // Comment out so the compiler doesn't complain about unused assignments.
+                            }
+                        }
+                        //assert!(out_set);
+                        return out;
+                    }
+
+                    // Special case for 'max' function
+                    ("max", [], [fi, is @ ..]) => {
+                        let first = ast.get_expr(*fi).compile(ast, oast);
+                        let mut rest = Vec::<Instruction>::with_capacity(is.len());
+                        for i in is {
+                            rest.push(ast.get_expr(*i).compile(ast, oast));
+                        }
+                        let mut out = IConst(0.0);
+                        let mut out_set = false;
+                        let mut const_max = 0.0;
+                        let mut const_max_set = false;
+                        if let IConst(f) = first {
+                            const_max = f;
+                            const_max_set = true;
+                        } else {
+                            out = first;
+                            out_set = true;
+                        }
+                        for instr in rest {
+                            if let IConst(f) = instr {
+                                if const_max_set {
+                                    const_max = const_max.max(f);
+                                    // if f > const_max {
+                                    //     const_max = f;
+                                    // }
+                                } else {
+                                    const_max = f;
+                                    const_max_set = true;
+                                }
+                            } else {
+                                if out_set {
+                                    out = IMax(oast.push(out), IC::I(oast.push(instr)));
+                                } else {
+                                    out = instr;
+                                    out_set = true;
+                                }
+                            }
+                        }
+                        if const_max_set {
+                            if out_set {
+                                out = IMax(oast.push(out), IC::C(const_max));
+                            } else {
+                                out = IConst(const_max);
+                                // out_set = true;  // Comment out so the compiler doesn't complain about unused assignments.
+                            }
+                        }
+                        //assert!(out_set);
+                        return out;
+                    }
+                    (_, [], [arg]) => {
                         if let Some(f) = builtins::func_1f(name) {
                             let instr = ast.get_expr(*arg).compile(ast, oast);
                             return {
                                 if let IConst(c) = instr {
                                     IConst(f(c))
                                 } else {
-                                    IFunc_f(f, oast.push(instr))
+                                    IFunc_1F(f, oast.push(instr))
                                 }
                             };
                         }
                     }
-                    ([], [arg0, arg1]) => {
+                    (_, [], [arg0, arg1]) => {
                         if let Some(f) = builtins::func_2f(name) {
                             let instr0 = ast.get_expr(*arg0).compile(ast, oast);
                             let instr1 = ast.get_expr(*arg1).compile(ast, oast);
@@ -866,19 +824,19 @@ impl Compiler for StdFunc {
                                 if let (IConst(c0), IConst(c1)) = (&instr0, &instr1) {
                                     IConst(f(*c0, *c1))
                                 } else {
-                                    IFunc_f_f(f, oast.instr_to_ic(instr0), oast.instr_to_ic(instr1))
+                                    IFunc_2F(f, oast.instr_to_ic(instr0), oast.instr_to_ic(instr1))
                                 }
                             };
                         }
                     }
-                    ([sarg], _) => {
+                    (_, [sarg], _) => {
                         if let Some(f) = builtins::func_1s_nf(name) {
                             let mut iargs = Vec::<IC>::with_capacity(args.len());
                             for i in args {
                                 let instr = ast.get_expr(*i).compile(ast, oast);
                                 iargs.push(oast.instr_to_ic(instr));
                             }
-                            return IFunc_s_nf(f, sarg.clone(), iargs);
+                            return IFunc_1S_NF(f, sarg.clone(), iargs);
                         }
                     }
                     _ => (),

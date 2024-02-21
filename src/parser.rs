@@ -182,7 +182,18 @@ impl fmt::Debug for ExprPair {
 pub enum Value {
     EConst(f64),
     EUnaryOp(UnaryOp),
-    EStdFunc(StdFunc),
+    EVar(String),
+    #[cfg(feature = "unsafe-vars")]
+    EUnsafeVar {
+        name: String,
+        ptr: *const f64,
+    },
+
+    EFunc {
+        name: String,
+        sargs: Vec<String>, // cap=2
+        args: Vec<usize>,   // cap=4
+    },
 }
 use Value::*;
 
@@ -190,8 +201,15 @@ impl fmt::Debug for Value {
     fn fmt(&self, f: &mut fmt::Formatter) -> Result<(), fmt::Error> {
         match self {
             EUnaryOp(x) => write!(f, "{:?}", x)?,
-            EStdFunc(x) => write!(f, "{:?}", x)?,
             EConst(v) => write!(f, "EConst({:?})", v)?,
+            EVar(s) => write!(f, "EVar({:?})", s)?,
+            #[cfg(feature = "unsafe-vars")]
+            EUnsafeVar { name, ptr } => write!(f, "EUnsafeVar({:?}, {:?})", name, ptr)?,
+            EFunc {
+                name,
+                sargs, // cap=2
+                args,  // cap=4
+            } => write!(f, "EFunc({:?}, {:?}, {:?})", name, sargs, args)?,
         }
 
         Ok(())
@@ -229,32 +247,6 @@ pub enum BinaryOp {
     EExp = 14, // Highest Priority
 }
 use BinaryOp::*;
-
-/// A Function Call with Standard Syntax.
-#[derive(Debug, PartialEq)]
-pub enum StdFunc {
-    EVar(String),
-    #[cfg(feature = "unsafe-vars")]
-    EUnsafeVar {
-        name: String,
-        ptr: *const f64,
-    },
-
-    EFunc {
-        name: String,
-        sargs: Vec<String>, // cap=2
-        args: Vec<usize>,   // cap=4
-    },
-    EMin {
-        first: usize,
-        rest: Vec<usize>,
-    }, // cap=4
-    EMax {
-        first: usize,
-        rest: Vec<usize>,
-    }, // cap=4
-}
-use StdFunc::*;
 
 macro_rules! peek {
     ($bs:ident) => {
@@ -632,26 +624,16 @@ fn read_callable(ast: &mut AST, bs: &mut &[u8], depth: usize) -> Result<Option<V
 
                     #[cfg(feature = "unsafe-vars")]
                     match ast.unsafe_vars.get(&varname) {
-                        None => Ok(Some(EStdFunc(EVar(varname)))),
-                        Some(&ptr) => Ok(Some(EStdFunc(EUnsafeVar { name: varname, ptr }))),
+                        None => Ok(Some(EVar(varname))),
+                        Some(&ptr) => Ok(Some(EUnsafeVar { name: varname, ptr })),
                     }
 
                     #[cfg(not(feature = "unsafe-vars"))]
-                    Ok(Some(EStdFunc(EVar(varname))))
+                    Ok(Some(EVar(varname)))
                 }
                 Some(open_parenth) => {
                     // VarNames with Parenthesis are first matched against builtins, then custom.
-                    Ok(Some(EStdFunc(read_func(
-                        varname, ast, bs, depth, open_parenth,
-                    )?)))
-                    // match varname.as_ref() {
-                    //     "print" => Ok(Some(EStdFunc(read_printfunc(
-                    //         ast, bs, depth, open_parenth,
-                    //     )?))),
-                    //     _ => Ok(Some(EStdFunc(read_func(
-                    //         varname, ast, bs, depth, open_parenth,
-                    //     )?))),
-                    // }
+                    Ok(Some(read_func(varname, ast, bs, depth, open_parenth)?))
                 }
             }
         }
@@ -693,7 +675,7 @@ fn read_func(
     bs: &mut &[u8],
     depth: usize,
     open_parenth: u8,
-) -> Result<StdFunc, Error> {
+) -> Result<Value, Error> {
     let close_parenth = match open_parenth {
         b'(' => b')',
         b'[' => b']',
@@ -734,49 +716,22 @@ fn read_func(
         args.push(read_expr(ast, bs, depth + 1, false)?);
     }
 
-    let fname_str = fname.as_str();
-
-    match fname_str {
-        "min" => {
-            if !args.is_empty() {
-                match remove_no_panic(&mut args, 0) {
-                    Some(first) => Ok(EMin { first, rest: args }),
-                    None => Err(Error::Unreachable),
-                }
-            } else {
-                Err(Error::WrongArgs(
-                    "min: expected one or more args".to_string(),
-                ))
-            }
-        }
-        "max" => {
-            if !args.is_empty() {
-                match remove_no_panic(&mut args, 0) {
-                    Some(first) => Ok(EMax { first, rest: args }),
-                    None => Err(Error::Unreachable),
-                }
-            } else {
-                Err(Error::WrongArgs(
-                    "max: expected one or more args".to_string(),
-                ))
-            }
-        }
-
-        _ => {
-            #[cfg(feature = "unsafe-vars")]
-            match ast.unsafe_vars.get(fname_str) {
-                None => Ok(EFunc { name: fname, args }),
-                Some(&ptr) => Ok(EUnsafeVar { name: fname, ptr }),
-            }
-
-            #[cfg(not(feature = "unsafe-vars"))]
-            Ok(EFunc {
-                name: fname,
-                sargs,
-                args,
-            })
-        }
+    #[cfg(feature = "unsafe-vars")]
+    match ast.unsafe_vars.get(&fname) {
+        None => Ok(EFunc {
+            name: fname,
+            sargs,
+            args,
+        }),
+        Some(&ptr) => Ok(EUnsafeVar { name: fname, ptr }),
     }
+
+    #[cfg(not(feature = "unsafe-vars"))]
+    Ok(EFunc {
+        name: fname,
+        sargs,
+        args,
+    })
 }
 
 fn read_string(bs: &mut &[u8]) -> Result<Option<String>, Error> {

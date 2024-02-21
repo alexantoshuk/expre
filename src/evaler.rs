@@ -130,11 +130,11 @@ impl Evaler for Instruction {
                 dst.insert(name.clone());
             }
 
-            IFunc_f(_, ii) => {
+            IFunc_1F(_, ii) => {
                 oast.get(*ii)._var_names(oast, dst);
             }
 
-            IFunc_f_f(_, ic0, ic1) => {
+            IFunc_2F(_, ic0, ic1) => {
                 if let IC::I(i) = ic0 {
                     oast.get(*i)._var_names(oast, dst);
                 }
@@ -143,7 +143,7 @@ impl Evaler for Instruction {
                 }
             }
 
-            IFunc_s_nf(_, _, nic) => {
+            IFunc_1S_NF(_, _, nic) => {
                 for ic in nic {
                     if let IC::I(i) = ic {
                         oast.get(*i)._var_names(oast, dst);
@@ -214,18 +214,18 @@ impl Evaler for Instruction {
 
             IVar(name) => eval_var!(ns, name, Vec::new()),
 
-            IFunc_f(f, i) => {
+            IFunc_1F(f, i) => {
                 let v = eval_compiled_ref!(oast.get(*i), oast, ns);
                 Ok(f(v))
             }
 
-            IFunc_f_f(f, ric0, ric1) => {
+            IFunc_2F(f, ric0, ric1) => {
                 let v0 = eval_ic_ref!(ric0, oast, ns);
                 let v1 = eval_ic_ref!(ric1, oast, ns);
                 Ok(f(v0, v1))
             }
 
-            IFunc_s_nf(f, s, nic) => {
+            IFunc_1S_NF(f, s, nic) => {
                 let mut args = Vec::with_capacity(nic.len());
                 for ic in nic {
                     args.push(eval_ic_ref!(ic, oast, ns));
