@@ -5,10 +5,9 @@
 //! which is much faster for common cases.
 
 use crate::compiler::OAST;
-use crate::compiler::{Instruction, Instruction::*, IC};
+use crate::compiler::{Instruction, Instruction::*, I, IC};
 use crate::error::Error;
 use crate::evalns::EvalNamespace;
-use dyn_fmt;
 use std::collections::BTreeSet;
 use std::fmt;
 
@@ -58,7 +57,7 @@ macro_rules! eval_compiled_ref {
 macro_rules! eval_ic_ref {
     ($ic:ident, $cslab_ref:ident, $ns_mut:expr) => {
         match $ic {
-            IC::C(c) => *c,
+            IC::IConst(c) => *c,
             IC::I(i) => {
                 let instr_ref = $cslab_ref.get(*i);
 
@@ -123,9 +122,6 @@ impl Evaler for Instruction {
                 dst.insert(s.clone());
             }
 
-            // IFunc(name, ..) => {
-            //     dst.insert(name.clone());
-            // }
             IFunc(name, ..) => {
                 dst.insert(name.clone());
             }

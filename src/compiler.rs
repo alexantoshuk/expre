@@ -27,16 +27,40 @@
 use crate::builtins;
 #[cfg(feature = "unsafe-vars")]
 use crate::parser::StdFunc::EUnsafeVar;
-use crate::parser::AST;
+
+pub use crate::parser::I;
 use crate::parser::{
     BinaryOp::{self, *},
     Expr, ExprPair,
     UnaryOp::{self, *},
     Value::{self, *},
+    AST,
 };
 use crate::write_indexed_list;
-use std::fmt;
+use std::fmt::{self, Debug};
 use std::mem;
+
+/// This enumeration boosts performance because it eliminates expensive function calls for constant values.
+#[derive(PartialEq)]
+pub enum IC {
+    I(usize),
+    IConst(f64),
+}
+impl Debug for IC {
+    fn fmt(&self, f: &mut fmt::Formatter) -> Result<(), fmt::Error> {
+        match self {
+            IC::I(i) => write!(f, ":{}", i),
+            IC::IConst(v) => write!(f, "IConst({:?})", v),
+        }
+    }
+}
+
+impl From<I> for IC {
+    #[inline(always)]
+    fn from(value: I) -> Self {
+        IC::I(value.0)
+    }
+}
 
 impl AST {
     #[inline]
@@ -79,23 +103,23 @@ impl OAST {
     /// If `instr_i` is out-of-bounds, a reference to a default `Instruction` is returned.
     ///
     #[inline(always)]
-    pub fn get(&self, instr_i: usize) -> &Instruction {
-        self.instrs.get(instr_i).unwrap()
+    pub fn get<T: Into<usize>>(&self, instr_i: T) -> &Instruction {
+        self.instrs.get(instr_i.into()).unwrap()
     }
 
     #[inline(always)]
     pub fn instr_to_ic(&mut self, instr: Instruction) -> IC {
         match instr {
-            IConst(c) => IC::C(c),
-            _ => IC::I(self.push(instr)),
+            IConst(c) => IC::IConst(c),
+            _ => IC::from(self.push(instr)),
         }
     }
     /// Appends an `Instruction` to `OAST.instrs`.
     #[inline(always)]
-    fn push(&mut self, instr: Instruction) -> usize {
+    fn push(&mut self, instr: Instruction) -> I {
         let i = self.instrs.len();
         self.instrs.push(instr);
-        i
+        i.into()
     }
 
     /// Removes an `Instruction` from `OAST.instrs` as efficiently as possible.
@@ -111,31 +135,15 @@ impl OAST {
     }
 }
 
-impl fmt::Debug for OAST {
+impl Debug for OAST {
     fn fmt(&self, f: &mut fmt::Formatter) -> Result<(), fmt::Error> {
-        write!(f, "OAST [")?;
+        write!(f, "OAST[")?;
         write_indexed_list(f, &self.instrs)?;
         write!(f, "]")?;
         Ok(())
     }
 }
 
-/// This enumeration boosts performance because it eliminates expensive function calls for constant values.
-#[derive(PartialEq)]
-pub enum IC {
-    I(usize),
-    C(f64),
-}
-impl fmt::Debug for IC {
-    fn fmt(&self, f: &mut fmt::Formatter) -> Result<(), fmt::Error> {
-        match self {
-            IC::I(i) => write!(f, "{}", i)?,
-            IC::C(v) => write!(f, "IConst({})", v)?,
-        }
-
-        Ok(())
-    }
-}
 /// An `Instruction` is an optimized AST node resulting from compilation.
 #[allow(non_camel_case_types)]
 #[derive(Debug, PartialEq)]
@@ -146,14 +154,14 @@ pub enum Instruction {
     //---- Unary Ops:
     // Parentheses is a noop
     // Pos is a noop
-    INeg(usize),
-    INot(usize),
-    IInv(usize),
+    INeg(I),
+    INot(I),
+    IInv(I),
 
     //---- Binary Math Ops:
-    IAdd(usize, IC),
+    IAdd(I, IC),
     // A Sub(x) is converted to an Add(Neg(x)).
-    IMul(usize, IC),
+    IMul(I, IC),
     // A Div(n,d) is converted to a Mul(n,Inv(d)).
     IMod(IC, IC),
 
@@ -168,8 +176,8 @@ pub enum Instruction {
     IGT(IC, IC),
 
     //---- Binary Logic Ops:
-    IOR(usize, IC),
-    IAND(usize, IC),
+    IOR(I, IC),
+    IAND(I, IC),
 
     //---- Callables:
     IVar(String),
@@ -178,15 +186,13 @@ pub enum Instruction {
         name: String,
         ptr: *const f64,
     },
-    // IFunc(String, Vec<IC>),
     IFunc(String, Vec<String>, Vec<IC>),
-    IFunc_1F(fn(f64) -> f64, usize),
+    IFunc_1F(fn(f64) -> f64, I),
     IFunc_2F(fn(f64, f64) -> f64, IC, IC),
     IFunc_1S_NF(fn(&str, Vec<f64>) -> f64, String, Vec<IC>),
 
-    IMin(usize, IC),
-    IMax(usize, IC),
-    // IPrintFunc(String, Vec<IC>),
+    IMin(I, IC),
+    IMax(I, IC),
 }
 use Instruction::*;
 
@@ -317,7 +323,7 @@ fn compile_mul(instrs: Vec<Instruction>, oast: &mut OAST) -> Instruction {
             const_prod *= c; // Floats don't overflow.
         } else {
             if out_set {
-                out = IMul(oast.push(out), IC::I(oast.push(instr)));
+                out = IMul(oast.push(out), IC::from(oast.push(instr)));
             } else {
                 out = instr;
                 out_set = true;
@@ -326,7 +332,7 @@ fn compile_mul(instrs: Vec<Instruction>, oast: &mut OAST) -> Instruction {
     }
     if f64_ne!(const_prod, 1.0) {
         if out_set {
-            out = IMul(oast.push(out), IC::C(const_prod));
+            out = IMul(oast.push(out), IC::IConst(const_prod));
         } else {
             out = IConst(const_prod);
         }
@@ -347,7 +353,7 @@ fn compile_add(instrs: Vec<Instruction>, oast: &mut OAST) -> Instruction {
             const_sum += c; // Floats don't overflow.
         } else {
             if out_set {
-                out = IAdd(oast.push(out), IC::I(oast.push(instr)));
+                out = IAdd(oast.push(out), IC::from(oast.push(instr)));
             } else {
                 out = instr;
                 out_set = true;
@@ -356,7 +362,7 @@ fn compile_add(instrs: Vec<Instruction>, oast: &mut OAST) -> Instruction {
     }
     if f64_ne!(const_sum, 0.0) {
         if out_set {
-            out = IAdd(oast.push(out), IC::C(const_sum));
+            out = IAdd(oast.push(out), IC::IConst(const_sum));
         } else {
             out = IConst(const_sum);
         }
@@ -365,10 +371,10 @@ fn compile_add(instrs: Vec<Instruction>, oast: &mut OAST) -> Instruction {
 }
 
 // Can't inline recursive functions:
-fn push_mul_leaves(instrs: &mut Vec<Instruction>, oast: &mut OAST, li: usize, ric: IC) {
+fn push_mul_leaves(instrs: &mut Vec<Instruction>, oast: &mut OAST, li: I, ric: IC) {
     // Take 'r' before 'l' for a chance for more efficient memory usage:
     match ric {
-        IC::I(ri) => {
+        IC::I(_) => {
             let instr = oast.pop();
             if let IMul(rli, rric) = instr {
                 push_mul_leaves(instrs, oast, rli, rric);
@@ -376,7 +382,7 @@ fn push_mul_leaves(instrs: &mut Vec<Instruction>, oast: &mut OAST, li: usize, ri
                 instrs.push(instr);
             }
         }
-        IC::C(c) => instrs.push(IConst(c)),
+        IC::IConst(c) => instrs.push(IConst(c)),
     };
 
     let instr = oast.pop();
@@ -387,7 +393,7 @@ fn push_mul_leaves(instrs: &mut Vec<Instruction>, oast: &mut OAST, li: usize, ri
     }
 }
 
-fn push_add_leaves(instrs: &mut Vec<Instruction>, oast: &mut OAST, li: usize, ric: IC) {
+fn push_add_leaves(instrs: &mut Vec<Instruction>, oast: &mut OAST, li: I, ric: IC) {
     // Take 'r' before 'l' for a chance for more efficient memory usage:
     match ric {
         IC::I(ri) => {
@@ -398,7 +404,7 @@ fn push_add_leaves(instrs: &mut Vec<Instruction>, oast: &mut OAST, li: usize, ri
                 instrs.push(instr);
             }
         }
-        IC::C(c) => instrs.push(IConst(c)),
+        IC::IConst(c) => instrs.push(IConst(c)),
     };
 
     let instr = oast.pop();
@@ -736,7 +742,7 @@ impl Compiler for Value {
                                 }
                             } else {
                                 if out_set {
-                                    out = IMin(oast.push(out), IC::I(oast.push(instr)));
+                                    out = IMin(oast.push(out), IC::from(oast.push(instr)));
                                 } else {
                                     out = instr;
                                     out_set = true;
@@ -745,7 +751,7 @@ impl Compiler for Value {
                         }
                         if const_min_set {
                             if out_set {
-                                out = IMin(oast.push(out), IC::C(const_min));
+                                out = IMin(oast.push(out), IC::IConst(const_min));
                             } else {
                                 out = IConst(const_min);
                                 // out_set = true;  // Comment out so the compiler doesn't complain about unused assignments.
@@ -786,7 +792,7 @@ impl Compiler for Value {
                                 }
                             } else {
                                 if out_set {
-                                    out = IMax(oast.push(out), IC::I(oast.push(instr)));
+                                    out = IMax(oast.push(out), IC::from(oast.push(instr)));
                                 } else {
                                     out = instr;
                                     out_set = true;
@@ -795,7 +801,7 @@ impl Compiler for Value {
                         }
                         if const_max_set {
                             if out_set {
-                                out = IMax(oast.push(out), IC::C(const_max));
+                                out = IMax(oast.push(out), IC::IConst(const_max));
                             } else {
                                 out = IConst(const_max);
                                 // out_set = true;  // Comment out so the compiler doesn't complain about unused assignments.

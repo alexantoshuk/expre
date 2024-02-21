@@ -27,16 +27,47 @@ use crate::error::Error;
 use crate::write_indexed_list;
 #[cfg(feature = "unsafe-vars")]
 use std::collections::BTreeMap;
-use std::fmt;
+use std::fmt::{self, Debug};
+use std::ops::Deref;
 use std::ptr;
 use std::str::{from_utf8, from_utf8_unchecked};
 
 pub const DEFAULT_EXPR_LEN_LIMIT: usize = 1024 * 10;
 pub const DEFAULT_EXPR_DEPTH_LIMIT: usize = 32;
 
+#[derive(Copy, Clone, PartialEq, Eq)]
+pub struct I(pub usize);
+
+impl Debug for I {
+    fn fmt(&self, f: &mut fmt::Formatter) -> Result<(), fmt::Error> {
+        write!(f, ":{}", self.0)
+    }
+}
+
+impl Deref for I {
+    type Target = usize;
+
+    #[inline(always)]
+    fn deref(&self) -> &Self::Target {
+        &self.0
+    }
+}
+
+impl From<usize> for I {
+    fn from(value: usize) -> Self {
+        I(value)
+    }
+}
+
+impl From<I> for usize {
+    fn from(value: I) -> Self {
+        value.0
+    }
+}
+
 pub struct AST {
     pub(crate) exprs: Vec<Expr>,
-    pub(crate) char_buf: String,
+    char_buf: String,
     #[cfg(feature = "unsafe-vars")]
     pub(crate) unsafe_vars: BTreeMap<String, *const f64>,
 }
@@ -71,9 +102,9 @@ impl AST {
     /// If `expr_i` is out-of-bounds, a reference to a default `Expr` is returned.
     ///
     #[inline(always)]
-    pub fn get_expr(&self, expr_i: usize) -> &Expr {
+    pub fn get_expr(&self, expr_i: I) -> &Expr {
         // I'm using this non-panic match structure to boost performance:
-        self.exprs.get(expr_i).unwrap()
+        self.exprs.get(expr_i.0).unwrap()
     }
 
     #[inline(always)]
@@ -87,9 +118,9 @@ impl AST {
     /// If `val_i` is out-of-bounds, a reference to a default `Value` is returned.
     ///
     #[inline(always)]
-    pub fn get_val(&self, val_i: usize) -> &Value {
+    pub fn get_val(&self, val_i: I) -> &Value {
         // self.vals.get(val_i).unwrap()
-        &self.exprs.get(val_i).unwrap().0
+        &self.exprs.get(val_i.0).unwrap().0
     }
 
     /// Appends an `Expr` to `AST.exprs`.
@@ -99,23 +130,23 @@ impl AST {
     /// If `AST.exprs` is already full, a `ASTOverflow` error is returned.
     ///
     #[inline(always)]
-    pub(crate) fn push_expr(&mut self, expr: Expr) -> Result<usize, Error> {
+    pub(crate) fn push_expr(&mut self, expr: Expr) -> Result<I, Error> {
         let i = self.exprs.len();
         // if i >= self.exprs.capacity() {
         //     return Err(Error::ASTOverflow);
         // }
         self.exprs.push(expr);
-        Ok(i)
+        Ok(i.into())
     }
 
     #[inline(always)]
-    pub(crate) fn push_val(&mut self, val: Value) -> Result<usize, Error> {
+    pub(crate) fn push_val(&mut self, val: Value) -> Result<I, Error> {
         let i = self.exprs.len();
         // if i >= self.exprs.capacity() {
         //     return Err(Error::ASTOverflow);
         // }
         self.exprs.push(Expr(val, vec![]));
-        Ok(i)
+        Ok(i.into())
     }
 
     /// [See the `add_unsafe_var()` documentation above.](#unsafe-variable-registration-with-add_unsafe_var)
@@ -126,9 +157,9 @@ impl AST {
     }
 }
 
-impl fmt::Debug for AST {
+impl Debug for AST {
     fn fmt(&self, f: &mut fmt::Formatter) -> Result<(), fmt::Error> {
-        write!(f, "AST [")?;
+        write!(f, "AST[")?;
         write_indexed_list(f, &self.exprs)?;
         write!(f, "]")?;
         Ok(())
@@ -154,31 +185,30 @@ pub struct Expr(
     pub Vec<ExprPair>, // cap=8
 );
 
-impl fmt::Debug for Expr {
+impl Debug for Expr {
     fn fmt(&self, f: &mut fmt::Formatter) -> Result<(), fmt::Error> {
         if self.1.is_empty() {
-            write!(f, "{:?}", self.0)?;
+            write!(f, "{:?}", self.0)
         } else {
-            write!(f, "{:?}, {:?}", self.0, self.1)?;
+            write!(f, "{:?}, {:?}", self.0, self.1)
         }
-
-        Ok(())
     }
 }
 
-#[derive(PartialEq)]
-pub struct ExprPair(pub BinaryOp, pub Value);
+pub(crate) type ExprPair = (BinaryOp, Value);
+// #[derive(Debug, PartialEq)]
+// pub struct ExprPair(pub BinaryOp, pub Value);
 
-impl fmt::Debug for ExprPair {
-    fn fmt(&self, f: &mut fmt::Formatter) -> Result<(), fmt::Error> {
-        write!(f, "({:?}, {:?})", self.0, self.1)?;
+// impl fmt::Display for ExprPair {
+//     fn fmt(&self, f: &mut fmt::Formatter) -> Result<(), fmt::Error> {
+//         write!(f, "({:?}, {:?})", self.0, self.1)?;
 
-        Ok(())
-    }
-}
+//         Ok(())
+//     }
+// }
 
 /// A `Value` can be a Constant, a UnaryOp, a StdFunc, or a PrintFunc.
-#[derive(PartialEq)]
+#[derive(Debug, PartialEq)]
 pub enum Value {
     EConst(f64),
     EUnaryOp(UnaryOp),
@@ -192,37 +222,18 @@ pub enum Value {
     EFunc {
         name: String,
         sargs: Vec<String>, // cap=2
-        args: Vec<usize>,   // cap=4
+        args: Vec<I>,       // cap=4
     },
 }
 use Value::*;
 
-impl fmt::Debug for Value {
-    fn fmt(&self, f: &mut fmt::Formatter) -> Result<(), fmt::Error> {
-        match self {
-            EUnaryOp(x) => write!(f, "{:?}", x)?,
-            EConst(v) => write!(f, "EConst({:?})", v)?,
-            EVar(s) => write!(f, "EVar({:?})", s)?,
-            #[cfg(feature = "unsafe-vars")]
-            EUnsafeVar { name, ptr } => write!(f, "EUnsafeVar({:?}, {:?})", name, ptr)?,
-            EFunc {
-                name,
-                sargs, // cap=2
-                args,  // cap=4
-            } => write!(f, "EFunc({:?}, {:?}, {:?})", name, sargs, args)?,
-        }
-
-        Ok(())
-    }
-}
-
 /// Unary Operators
 #[derive(Debug, PartialEq)]
 pub enum UnaryOp {
-    EPos(usize),
-    ENeg(usize),
-    ENot(usize),
-    EParen(usize),
+    EPos(I),
+    ENeg(I),
+    ENot(I),
+    EParen(I),
 }
 use UnaryOp::*;
 
@@ -351,12 +362,7 @@ pub fn parse<'a, S: AsRef<str>>(expr_str: S, ast: &'a mut AST) -> Result<(), Err
     read_expr(ast, &mut bs, 0, true).map(|_| ())
 }
 
-fn read_expr(
-    ast: &mut AST,
-    bs: &mut &[u8],
-    depth: usize,
-    expect_eof: bool,
-) -> Result<usize, Error> {
+fn read_expr(ast: &mut AST, bs: &mut &[u8], depth: usize, expect_eof: bool) -> Result<I, Error> {
     if depth > DEFAULT_EXPR_DEPTH_LIMIT {
         return Err(Error::TooDeep);
     }
@@ -369,7 +375,7 @@ fn read_expr(
             None => break,
             Some(bop) => {
                 let val = read_value(ast, bs, depth)?;
-                pairs.push(ExprPair(bop, val));
+                pairs.push((bop, val));
             }
         }
     }
@@ -682,7 +688,7 @@ fn read_func(
         _ => return Err(Error::Expected("'(' or '['".to_string())),
     };
     let mut sargs = Vec::<String>::with_capacity(2);
-    let mut args = Vec::<usize>::with_capacity(4);
+    let mut args = Vec::<I>::with_capacity(4);
 
     loop {
         spaces!(bs);
@@ -774,44 +780,10 @@ fn read_string(bs: &mut &[u8]) -> Result<Option<String>, Error> {
     }
 }
 
-// A version of Vec::remove that doesn't panic:
-// (Mostly copy-pasted from https://doc.rust-lang.org/src/alloc/vec.rs.html#991-1010 .)
-pub(crate) fn remove_no_panic<T>(vself: &mut Vec<T>, index: usize) -> Option<T> {
-    let len = vself.len();
-    if index >= len {
-        return None;
-    }
-    unsafe {
-        // infallible
-        let ret;
-        {
-            // the place we are taking from.
-            let ptr = vself.as_mut_ptr().add(index);
-            // copy it out, unsafely having a copy of the value on
-            // the stack and in the vector at the same time.
-            ret = ptr::read(ptr);
-
-            // Shift everything down to fill in that spot.
-            ptr::copy(ptr.offset(1), ptr, len - index - 1);
-        }
-        vself.set_len(len - 1);
-        Some(ret)
-    }
-}
-
 #[cfg(test)]
 mod test {
     use super::*;
     use crate::parser::AST;
-
-    #[test]
-    fn test_remove_no_panic() {
-        let mut v = vec![1u8, 2, 3];
-        assert_eq!(format!("{:?}", v), "[1, 2, 3]");
-        assert_eq!(remove_no_panic(&mut v, 1), Some(2));
-        assert_eq!(remove_no_panic(&mut v, 10), None);
-        assert_eq!(format!("{:?}", v), "[1, 3]");
-    }
 
     #[test]
     fn test_util() {
