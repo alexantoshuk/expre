@@ -35,6 +35,84 @@ use std::str::{from_utf8, from_utf8_unchecked};
 pub const DEFAULT_EXPR_LEN_LIMIT: usize = 1024 * 10;
 pub const DEFAULT_EXPR_DEPTH_LIMIT: usize = 32;
 
+macro_rules! peek {
+    ($bs:ident) => {
+        $bs.first().copied()
+    };
+}
+macro_rules! peek_n {
+    ($bs:ident, $skip:literal) => {
+        $bs.get($skip).copied()
+    };
+    ($bs:ident, $skip:ident) => {
+        $bs.get($skip).copied()
+    };
+    ($bs:ident, $skip:expr) => {
+        $bs.get($skip).copied()
+    };
+}
+macro_rules! peek_is {
+    ($bs:ident, $skip:literal, $val:literal) => {
+        peek_n!($bs, $skip) == Some($val)
+    };
+    ($bs:ident, $skip:expr, $val:literal) => {
+        peek_n!($bs, $skip) == Some($val)
+    };
+}
+
+macro_rules! read {
+    ($bs:ident) => {
+        match $bs.first() {
+            Some(b) => {
+                *$bs = &$bs[1..];
+                Ok(*b)
+            }
+            None => Err(Error::EOF),
+        }
+    };
+    ($bs:ident, $parsing:literal) => {
+        match $bs.first() {
+            Some(b) => {
+                *$bs = &$bs[1..];
+                Ok(*b)
+            }
+            None => Err(Error::EofWhileParsing($parsing.to_string())),
+        }
+    };
+}
+
+macro_rules! skip {
+    ($bs:ident) => {
+        *$bs = &$bs[1..];
+    };
+}
+macro_rules! skip_n {
+    ($bs:ident, $n:literal) => {
+        *$bs = &$bs[$n..];
+    };
+    ($bs:ident, $n:ident) => {
+        *$bs = &$bs[$n..];
+    };
+}
+
+macro_rules! is_space {
+    ($b:ident) => {
+        if $b > b' ' {
+            false
+        } else {
+            $b == b' ' || $b == b'\n' || $b == b'\t' || $b == b'\r'
+        }
+    };
+}
+macro_rules! spaces {
+    ($bs:ident) => {
+        while let Some(b) = peek!($bs) {
+            if !is_space!(b) { break }
+            skip!($bs);  // We normally don't have long strings of whitespace, so it is more efficient to put this single-skip inside this loop rather than a skip_n afterwards.
+        }
+    };
+}
+
 #[derive(Copy, Clone, PartialEq, Eq)]
 pub struct I(pub usize);
 
@@ -69,7 +147,6 @@ impl From<I> for usize {
 
 pub struct Ast {
     pub(crate) exprs: Vec<Expr>,
-    char_buf: String,
     #[cfg(feature = "unsafe-vars")]
     pub(crate) unsafe_vars: BTreeMap<String, *const f64>,
 }
@@ -86,7 +163,6 @@ impl Ast {
     pub fn with_capacity(cap: usize) -> Self {
         Self {
             exprs: Vec::with_capacity(cap),
-            char_buf: String::with_capacity(64),
             #[cfg(feature = "unsafe-vars")]
             unsafe_vars: BTreeMap::new(),
         }
@@ -248,100 +324,9 @@ pub enum BinaryOp {
 }
 use BinaryOp::*;
 
-macro_rules! peek {
-    ($bs:ident) => {
-        $bs.first().copied()
-    };
-}
-macro_rules! peek_n {
-    ($bs:ident, $skip:literal) => {
-        $bs.get($skip).copied()
-    };
-    ($bs:ident, $skip:ident) => {
-        $bs.get($skip).copied()
-    };
-    ($bs:ident, $skip:expr) => {
-        $bs.get($skip).copied()
-    };
-}
-macro_rules! peek_is {
-    ($bs:ident, $skip:literal, $val:literal) => {
-        peek_n!($bs, $skip) == Some($val)
-    };
-    ($bs:ident, $skip:expr, $val:literal) => {
-        peek_n!($bs, $skip) == Some($val)
-    };
-}
-
-macro_rules! read {
-    ($bs:ident) => {
-        match $bs.first() {
-            Some(b) => {
-                *$bs = &$bs[1..];
-                Ok(*b)
-            }
-            None => Err(Error::EOF),
-        }
-    };
-    ($bs:ident, $parsing:literal) => {
-        match $bs.first() {
-            Some(b) => {
-                *$bs = &$bs[1..];
-                Ok(*b)
-            }
-            None => Err(Error::EofWhileParsing($parsing.to_string())),
-        }
-    };
-}
-
-macro_rules! skip {
-    ($bs:ident) => {
-        *$bs = &$bs[1..];
-    };
-}
-macro_rules! skip_n {
-    ($bs:ident, $n:literal) => {
-        *$bs = &$bs[$n..];
-    };
-    ($bs:ident, $n:ident) => {
-        *$bs = &$bs[$n..];
-    };
-}
-
-macro_rules! is_space {
-    ($b:ident) => {
-        if $b > b' ' {
-            false
-        } else {
-            $b == b' ' || $b == b'\n' || $b == b'\t' || $b == b'\r'
-        }
-    };
-}
-macro_rules! spaces {
-    ($bs:ident) => {
-        while let Some(b) = peek!($bs) {
-            if !is_space!(b) { break }
-            skip!($bs);  // We normally don't have long strings of whitespace, so it is more efficient to put this single-skip inside this loop rather than a skip_n afterwards.
-        }
-    };
-}
-
-fn is_varname_byte(b: u8, i: usize) -> bool {
-    (b'A' <= b && b <= b'Z')
-        || (b'a' <= b && b <= b'z')
-        || b == b'_'
-        || (i > 0 && (b'0' <= b && b <= b'9'))
-}
-fn is_varname_byte_opt(bo: Option<u8>, i: usize) -> bool {
-    match bo {
-        Some(b) => is_varname_byte(b, i),
-        None => false,
-    }
-}
-
 /// Use this function to parse an expression String. The `Ast` will be cleared first.
 #[inline]
-pub fn parse<'a, S: AsRef<str>>(expr_str: S, ast: &'a mut Ast) -> Result<(), Error> {
+pub fn parse<S: AsRef<str>>(expr_str: S, ast: &mut Ast) -> Result<(), Error> {
     let expr_str = expr_str.as_ref();
     ast.clear();
     if expr_str.len() > DEFAULT_EXPR_LEN_LIMIT {
@@ -379,6 +364,7 @@ fn read_expr(ast: &mut Ast, bs: &mut &[u8], depth: usize, expect_eof: bool) -> R
     Ok(ast.push_expr(Expr(first, pairs))?)
 }
 
+#[inline]
 fn read_value(ast: &mut Ast, bs: &mut &[u8], depth: usize) -> Result<Value, Error> {
     if depth > DEFAULT_EXPR_DEPTH_LIMIT {
         return Err(Error::TooDeep);
@@ -400,13 +386,12 @@ fn read_value(ast: &mut Ast, bs: &mut &[u8], depth: usize) -> Result<Value, Erro
     Err(Error::InvalidValue)
 }
 
+#[inline]
 fn read_const(ast: &mut Ast, bs: &mut &[u8]) -> Result<Option<f64>, Error> {
     spaces!(bs);
 
     let mut toklen = 0;
     let mut sign_ok = true;
-    let mut specials_ok = true;
-    let mut suffix_ok = true;
     let mut saw_val = false;
     loop {
         match peek_n!(bs, toklen) {
@@ -415,30 +400,13 @@ fn read_const(ast: &mut Ast, bs: &mut &[u8]) -> Result<Option<f64>, Error> {
                 if b'0' <= b && b <= b'9' || b == b'.' {
                     saw_val = true;
                     sign_ok = false;
-                    specials_ok = false;
                     toklen = toklen + 1;
                 } else if sign_ok && (b == b'-' || b == b'+') {
                     sign_ok = false;
                     toklen = toklen + 1;
                 } else if saw_val && (b == b'e' || b == b'E') {
-                    suffix_ok = false;
                     sign_ok = true;
                     toklen = toklen + 1;
-                } else if specials_ok
-                    && (b == b'N'
-                        && peek_is!(bs, toklen + 1, b'a')
-                        && peek_is!(bs, toklen + 2, b'N')
-                        || b == b'i'
-                            && peek_is!(bs, toklen + 1, b'n')
-                            && peek_is!(bs, toklen + 2, b'f'))
-                {
-                    #[cfg(feature = "alpha-keywords")]
-                    {
-                        saw_val = true;
-                        suffix_ok = false;
-                        toklen = toklen + 3;
-                    }
-                    break;
                 } else {
                     break;
                 }
@@ -450,36 +418,7 @@ fn read_const(ast: &mut Ast, bs: &mut &[u8]) -> Result<Option<f64>, Error> {
         return Ok(None);
     }
 
-    let mut tok = unsafe { from_utf8_unchecked(&bs[..toklen]) };
-    if suffix_ok {
-        match peek_n!(bs, toklen) {
-            None => (),
-            Some(b) => {
-                let (exp, suffixlen) = match b {
-                    b'k' | b'K' => (3, 1),
-                    b'M' => (6, 1),
-                    b'G' => (9, 1),
-                    b'T' => (12, 1),
-                    b'm' => (-3, 1),
-                    b'u' | b'\xb5' => (-6, 1), // ASCII-encoded 'µ'
-                    b'\xc2' if peek_is!(bs, toklen + 1, b'\xb5') => (-6, 2), // UTF8-encoded 'µ'
-                    b'n' => (-9, 1),
-                    b'p' => (-12, 1),
-                    _ => (0, 0),
-                };
-                if exp != 0 {
-                    ast.char_buf.clear();
-                    ast.char_buf.push_str(tok);
-                    ast.char_buf.push('e');
-                    ast.char_buf.push_str(&exp.to_string());
-                    tok = &ast.char_buf;
-
-                    toklen = toklen + suffixlen;
-                }
-            }
-        }
-    }
-
+    let tok = unsafe { from_utf8_unchecked(&bs[..toklen]) };
     let val = tok
         .parse::<f64>()
         .map_err(|_| Error::ParseF64(tok.to_string()))?;
@@ -531,84 +470,6 @@ fn read_unaryop(ast: &mut Ast, bs: &mut &[u8], depth: usize) -> Result<Option<Un
     }
 }
 
-fn read_binaryop(bs: &mut &[u8]) -> Result<Option<BinaryOp>, Error> {
-    spaces!(bs);
-    match peek!(bs) {
-        None => Ok(None), // Err(KErr::new("EOF")), -- EOF is usually OK in a BinaryOp position.
-        Some(b) => match b {
-            b'+' => {
-                skip!(bs);
-                Ok(Some(EAdd))
-            }
-            b'-' => {
-                skip!(bs);
-                Ok(Some(ESub))
-            }
-            b'*' => {
-                skip!(bs);
-                Ok(Some(EMul))
-            }
-            b'/' => {
-                skip!(bs);
-                Ok(Some(EDiv))
-            }
-            b'%' => {
-                skip!(bs);
-                Ok(Some(EMod))
-            }
-            b'^' => {
-                skip!(bs);
-                Ok(Some(EExp))
-            }
-            b'<' => {
-                skip!(bs);
-                if peek_is!(bs, 0, b'=') {
-                    skip!(bs);
-                    Ok(Some(ELTE))
-                } else {
-                    Ok(Some(ELT))
-                }
-            }
-            b'>' => {
-                skip!(bs);
-                if peek_is!(bs, 0, b'=') {
-                    skip!(bs);
-                    Ok(Some(EGTE))
-                } else {
-                    Ok(Some(EGT))
-                }
-            }
-            b'=' if peek_is!(bs, 1, b'=') => {
-                skip_n!(bs, 2);
-                Ok(Some(EEQ))
-            }
-            b'!' if peek_is!(bs, 1, b'=') => {
-                skip_n!(bs, 2);
-                Ok(Some(ENE))
-            }
-            #[cfg(feature = "alpha-keywords")]
-            b'o' if peek_is!(bs, 1, b'r') => {
-                skip_n!(bs, 2);
-                Ok(Some(EOR))
-            }
-            b'|' if peek_is!(bs, 1, b'|') => {
-                skip_n!(bs, 2);
-                Ok(Some(EOR))
-            }
-            #[cfg(feature = "alpha-keywords")]
-            b'a' if peek_is!(bs, 1, b'n') && peek_is!(bs, 2, b'd') => {
-                skip_n!(bs, 3);
-                Ok(Some(EAND))
-            }
-            b'&' if peek_is!(bs, 1, b'&') => {
-                skip_n!(bs, 2);
-                Ok(Some(EAND))
-            }
-            _ => Ok(None),
-        },
-    }
-}
-
 fn read_callable(ast: &mut Ast, bs: &mut &[u8], depth: usize) -> Result<Option<Value>, Error> {
     match read_varname(bs)? {
         None => Ok(None),
@@ -632,35 +493,6 @@ fn read_callable(ast: &mut Ast, bs: &mut &[u8], depth: usize) -> Result<Option<V
                 }
             }
         }
-    }
-}
-
-fn read_varname(bs: &mut &[u8]) -> Result<Option<String>, Error> {
-    spaces!(bs);
-
-    let mut toklen = 0;
-    while is_varname_byte_opt(peek_n!(bs, toklen), toklen) {
-        toklen = toklen + 1;
-    }
-
-    if toklen == 0 {
-        return Ok(None);
-    }
-
-    let out = unsafe { from_utf8_unchecked(&bs[..toklen]) }.to_string();
-    skip_n!(bs, toklen);
-    Ok(Some(out))
-}
-
-fn read_open_parenthesis(bs: &mut &[u8]) -> Result<Option<u8>, Error> {
-    spaces!(bs);
-
-    match peek!(bs) {
-        Some(b'(') | Some(b'[') => Ok(Some(match read!(bs) {
-            Ok(b) => b,
-            Err(..) => return Err(Error::Unreachable),
-        })),
-        _ => Ok(None),
     }
 }
 
@@ -727,6 +559,119 @@ fn read_func(
         sargs,
         args,
     })
+}
+
+#[inline(always)]
+fn is_varname_byte(b: u8, i: usize) -> bool {
+    (b'A' <= b && b <= b'Z')
+        || (b'a' <= b && b <= b'z')
+        || b == b'_'
+        || (i > 0 && (b'0' <= b && b <= b'9'))
+}
+#[inline(always)]
+fn is_varname_byte_opt(bo: Option<u8>, i: usize) -> bool {
+    match bo {
+        Some(b) => is_varname_byte(b, i),
+        None => false,
+    }
+}
+
+fn read_binaryop(bs: &mut &[u8]) -> Result<Option<BinaryOp>, Error> {
+    spaces!(bs);
+    match peek!(bs) {
+        None => Ok(None), // Err(KErr::new("EOF")), -- EOF is usually OK in a BinaryOp position.
+        Some(b) => match b {
+            b'+' => {
+                skip!(bs);
+                Ok(Some(EAdd))
+            }
+            b'-' => {
+                skip!(bs);
+                Ok(Some(ESub))
+            }
+            b'*' => {
+                skip!(bs);
+                Ok(Some(EMul))
+            }
+            b'/' => {
+                skip!(bs);
+                Ok(Some(EDiv))
+            }
+            b'%' => {
+                skip!(bs);
+                Ok(Some(EMod))
+            }
+            b'^' => {
+                skip!(bs);
+                Ok(Some(EExp))
+            }
+            b'<' => {
+                skip!(bs);
+                if peek_is!(bs, 0, b'=') {
+                    skip!(bs);
+                    Ok(Some(ELTE))
+                } else {
+                    Ok(Some(ELT))
+                }
+            }
+            b'>' => {
+                skip!(bs);
+                if peek_is!(bs, 0, b'=') {
+                    skip!(bs);
+                    Ok(Some(EGTE))
+                } else {
+                    Ok(Some(EGT))
+                }
+            }
+            b'=' if peek_is!(bs, 1, b'=') => {
+                skip_n!(bs, 2);
+                Ok(Some(EEQ))
+            }
+            b'!' if peek_is!(bs, 1, b'=') => {
+                skip_n!(bs, 2);
+                Ok(Some(ENE))
+            }
+            b'|' if peek_is!(bs, 1, b'|') => {
+                skip_n!(bs, 2);
+                Ok(Some(EOR))
+            }
+
+            b'&' if peek_is!(bs, 1, b'&') => {
+                skip_n!(bs, 2);
+                Ok(Some(EAND))
+            }
+            _ => Ok(None),
+        },
+    }
+}
+
+fn read_varname(bs: &mut &[u8]) -> Result<Option<String>, Error> {
+    spaces!(bs);
+
+    let mut toklen = 0;
+    while is_varname_byte_opt(peek_n!(bs, toklen), toklen) {
+        toklen = toklen + 1;
+    }
+
+    if toklen == 0 {
+        return Ok(None);
+    }
+
+    let out = unsafe { from_utf8_unchecked(&bs[..toklen]) }.to_string();
+    skip_n!(bs, toklen);
+    Ok(Some(out))
+}
+
+fn read_open_parenthesis(bs: &mut &[u8]) -> Result<Option<u8>, Error> {
+    spaces!(bs);
+
+    match peek!(bs) {
+        Some(b'(') | Some(b'[') => Ok(Some(match read!(bs) {
+            Ok(b) => b,
+            Err(..) => return Err(Error::Unreachable),
+        })),
+        _ => Ok(None),
+    }
 }
 
 fn read_string(bs: &mut &[u8]) -> Result<Option<String>, Error> {
