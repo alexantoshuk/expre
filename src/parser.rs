@@ -54,12 +54,14 @@ impl Deref for I {
 }
 
 impl From<usize> for I {
+    #[inline(always)]
     fn from(value: usize) -> Self {
         I(value)
     }
 }
 
 impl From<I> for usize {
+    #[inline(always)]
     fn from(value: I) -> Self {
         value.0
     }
@@ -99,8 +101,6 @@ impl AST {
     /// Returns a reference to the [`Expr`](../parser/struct.Expr.html)
     /// located at `expr_i` within the `AST.exprs'.
     ///
-    /// If `expr_i` is out-of-bounds, a reference to a default `Expr` is returned.
-    ///
     #[inline(always)]
     pub fn get_expr(&self, expr_i: I) -> &Expr {
         // I'm using this non-panic match structure to boost performance:
@@ -114,8 +114,6 @@ impl AST {
 
     /// Returns a reference to the [`Value`](../parser/enum.Value.html)
     /// located at `val_i` within the `AST.vals'.
-    ///
-    /// If `val_i` is out-of-bounds, a reference to a default `Value` is returned.
     ///
     #[inline(always)]
     pub fn get_val(&self, val_i: I) -> &Value {
@@ -176,6 +174,9 @@ impl<S: AsRef<str>> ParseExpr for S {
         super::parse(self, ast)
     }
 }
+
+pub(crate) type ExprPair = (BinaryOp, Value);
+
 /// An `Expr` is the top node of a parsed AST.
 ///
 /// It can be `compile()`d or `eval()`d.
@@ -194,18 +195,6 @@ impl Debug for Expr {
         }
     }
 }
-
-pub(crate) type ExprPair = (BinaryOp, Value);
-// #[derive(Debug, PartialEq)]
-// pub struct ExprPair(pub BinaryOp, pub Value);
-
-// impl fmt::Display for ExprPair {
-//     fn fmt(&self, f: &mut fmt::Formatter) -> Result<(), fmt::Error> {
-//         write!(f, "({:?}, {:?})", self.0, self.1)?;
-
-//         Ok(())
-//     }
-// }
 
 /// A `Value` can be a Constant, a UnaryOp, a StdFunc, or a PrintFunc.
 #[derive(Debug, PartialEq)]

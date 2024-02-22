@@ -5,7 +5,7 @@
 //! which is much faster for common cases.
 
 use crate::compiler::OAST;
-use crate::compiler::{Instruction, Instruction::*, I, IC};
+use crate::compiler::{Instruction, Instruction::*, ICV};
 use crate::error::Error;
 use crate::evalns::EvalNamespace;
 use std::collections::BTreeSet;
@@ -29,50 +29,77 @@ impl OAST {
 /// Since evaluation is a performance-critical operation, saving some function
 /// calls actually makes a huge performance difference.
 ///
-#[macro_export]
-macro_rules! eval_compiled_ref {
-    ($evaler:ident, $cslab_ref:expr, $ns_mut:expr) => {
-        if let IConst(c) = $evaler {
-            *c
-        } else {
-            #[cfg(feature = "unsafe-vars")]
-            {
-                if let IUnsafeVar { ptr, .. } = $evaler {
-                    unsafe { **ptr }
-                } else {
-                    $evaler.eval($cslab_ref, $ns_mut)?
-                }
-            }
+// #[macro_export]
+// macro_rules! eval_compiled_ref {
+//     ($evaler:ident, $oast_ref:expr, $ns_mut:expr) => {
+//         if let IConst(c) = $evaler {
+//             *c
+//         } else {
+//             #[cfg(feature = "unsafe-vars")]
+//             {
+//                 if let IUnsafeVar { ptr, .. } = $evaler {
+//                     unsafe { **ptr }
+//                 } else {
+//                     $evaler.eval($oast_ref, $ns_mut)?
+//                 }
+//             }
 
-            #[cfg(not(feature = "unsafe-vars"))]
-            $evaler.eval($cslab_ref, $ns_mut)?
-        }
-    };
-    ($evaler:expr, $cslab_ref:expr, $ns_mut:expr) => {{
-        let evaler = $evaler;
-        eval_compiled_ref!(evaler, $cslab_ref, $ns_mut)
-    }};
-}
+//             #[cfg(not(feature = "unsafe-vars"))]
+//             $evaler.eval($oast_ref, $ns_mut)?
+//         }
+//     };
+//     ($evaler:expr, $oast_ref:expr, $ns_mut:expr) => {{
+//         let evaler = $evaler;
+//         eval_compiled_ref!(evaler, $oast_ref, $ns_mut)
+//     }};
+// }
 
-macro_rules! eval_ic_ref {
-    ($ic:ident, $cslab_ref:ident, $ns_mut:expr) => {
-        match $ic {
-            IC::IConst(c) => *c,
-            IC::I(i) => {
-                let instr_ref = $cslab_ref.get(*i);
+macro_rules! eval_icv_ref {
+    ($icv:ident, $oast_ref:ident, $ns_mut:expr) => {
+        match $icv {
+            ICV::IConst(c) => *c,
+            ICV::IVar(name) => match $ns_mut.lookup(name, Vec::new()) {
+                Some(f) => f,
+                None => return Err(Error::Undefined(name.to_string())),
+            },
+            ICV::I(i) => {
+                let instr_ref = $oast_ref.get(*i);
 
                 #[cfg(feature = "unsafe-vars")]
                 {
                     if let crate::IUnsafeVar { ptr, .. } = instr_ref {
                         unsafe { **ptr }
                     } else {
-                        instr_ref.eval($cslab_ref, $ns_mut)?
+                        instr_ref.eval($oast_ref, $ns_mut)?
                     }
                 }
 
                 #[cfg(not(feature = "unsafe-vars"))]
-                instr_ref.eval($cslab_ref, $ns_mut)?
+                instr_ref.eval($oast_ref, $ns_mut)?
             }
+        }
+    };
+}
+
+macro_rules! eval_var {
+    ($ns:ident, $name:ident, $args:expr) => {
+        match $ns.lookup($name, $args) {
+            Some(f) => Ok(f),
+            None => Err(Error::Undefined($name.to_string())),
+        }
+    };
+}
+
+macro_rules! var_names {
+    ($icv:ident, $oast_ref:expr, $dst:expr) => {
+        match $icv {
+            ICV::I(i) => {
+                $oast_ref.get(*i)._var_names($oast_ref, $dst);
+            }
+            ICV::IVar(s) => {
+                $dst.insert(s.clone());
+            }
+            _ => {}
         }
     };
 }
@@ -100,15 +127,6 @@ pub trait Evaler: fmt::Debug {
     }
 }
 
-macro_rules! eval_var {
-    ($ns:ident, $name:ident, $args:expr) => {
-        match $ns.lookup($name, $args) {
-            Some(f) => Ok(f),
-            None => Err(Error::Undefined($name.to_string())),
-        }
-    };
-}
-
 impl Evaler for Instruction {
     #[inline(always)]
     fn _var_names(&self, oast: &OAST, dst: &mut BTreeSet<String>) {
@@ -125,36 +143,28 @@ impl Evaler for Instruction {
             IFunc(name, _, nic) => {
                 dst.insert(name.clone());
                 for ic in nic {
-                    if let IC::I(i) = ic {
-                        oast.get(*i)._var_names(oast, dst);
-                    }
+                    var_names!(ic, oast, dst);
                 }
             }
 
             IFunc_1F(_, ii) => {
-                oast.get(*ii)._var_names(oast, dst);
+                var_names!(ii, oast, dst);
             }
 
             IFunc_2F(_, ic0, ic1) => {
-                if let IC::I(i) = ic0 {
-                    oast.get(*i)._var_names(oast, dst);
-                }
-                if let IC::I(i) = ic1 {
-                    oast.get(*i)._var_names(oast, dst);
-                }
+                var_names!(ic0, oast, dst);
+                var_names!(ic1, oast, dst);
             }
 
             IFunc_1S_NF(_, _, nic) => {
                 for ic in nic {
-                    if let IC::I(i) = ic {
-                        oast.get(*i)._var_names(oast, dst);
-                    }
+                    var_names!(ic, oast, dst);
                 }
             }
 
             IConst(_) => (),
 
-            INeg(ii) | INot(ii) | IInv(ii) => oast.get(*ii)._var_names(oast, dst),
+            INeg(ii) | INot(ii) | IInv(ii) => var_names!(ii, oast, dst),
 
             ILT(lic, ric)
             | ILTE(lic, ric)
@@ -164,12 +174,8 @@ impl Evaler for Instruction {
             | IGT(lic, ric)
             | IMod(lic, ric)
             | IExp(lic, ric) => {
-                if let IC::I(i) = lic {
-                    oast.get(*i)._var_names(oast, dst);
-                }
-                if let IC::I(i) = ric {
-                    oast.get(*i)._var_names(oast, dst);
-                }
+                var_names!(lic, oast, dst);
+                var_names!(ric, oast, dst);
             }
 
             IAdd(li, ric)
@@ -178,58 +184,47 @@ impl Evaler for Instruction {
             | IAND(li, ric)
             | IMin(li, ric)
             | IMax(li, ric) => {
-                oast.get(*li)._var_names(oast, dst);
-                if let IC::I(i) = ric {
-                    oast.get(*i)._var_names(oast, dst);
-                }
-            } // IPrintFunc(_, args) => {
-              //     for ic in args {
-              //         if let IC::I(i) = ic {
-              //             oast.get(*i)._var_names(oast, dst);
-              //         }
-              //     }
-              // }
+                var_names!(li, oast, dst);
+                var_names!(ric, oast, dst);
+            }
         }
     }
-    #[inline(always)]
+    #[inline]
     fn eval(&self, oast: &OAST, ns: &mut impl EvalNamespace) -> Result<f64, Error> {
         match self {
             // I have manually ordered these match arms in a way that I feel should deliver good performance.
             // (I don't think this ordering actually affects the generated code, though.)
-            IMul(li, ric) => {
-                Ok(eval_compiled_ref!(oast.get(*li), oast, ns) * eval_ic_ref!(ric, oast, ns))
-            }
-            IAdd(li, ric) => {
-                Ok(eval_compiled_ref!(oast.get(*li), oast, ns) + eval_ic_ref!(ric, oast, ns))
-            }
+            IMul(li, ric) => Ok(eval_icv_ref!(li, oast, ns) * eval_icv_ref!(ric, oast, ns)),
+            IAdd(li, ric) => Ok(eval_icv_ref!(li, oast, ns) + eval_icv_ref!(ric, oast, ns)),
 
             IExp(base, power) => {
-                Ok(eval_ic_ref!(base, oast, ns).powf(eval_ic_ref!(power, oast, ns)))
+                Ok(eval_icv_ref!(base, oast, ns).powf(eval_icv_ref!(power, oast, ns)))
             }
 
-            INeg(i) => Ok(-eval_compiled_ref!(oast.get(*i), oast, ns)),
+            INeg(i) => Ok(-eval_icv_ref!(i, oast, ns)),
             IMod(dividend, divisor) => {
-                Ok(eval_ic_ref!(dividend, oast, ns) % eval_ic_ref!(divisor, oast, ns))
+                Ok(eval_icv_ref!(dividend, oast, ns) % eval_icv_ref!(divisor, oast, ns))
             }
-            IInv(i) => Ok(1.0 / eval_compiled_ref!(oast.get(*i), oast, ns)),
+            IInv(i) => Ok(1.0 / eval_icv_ref!(i, oast, ns)),
 
             IVar(name) => eval_var!(ns, name, Vec::new()),
 
             IFunc_1F(f, i) => {
-                let v = eval_compiled_ref!(oast.get(*i), oast, ns);
+                // let v = eval_compiled_ref!(oast.get(*i), oast, ns);
+                let v = eval_icv_ref!(i, oast, ns);
                 Ok(f(v))
             }
 
             IFunc_2F(f, ric0, ric1) => {
-                let v0 = eval_ic_ref!(ric0, oast, ns);
-                let v1 = eval_ic_ref!(ric1, oast, ns);
+                let v0 = eval_icv_ref!(ric0, oast, ns);
+                let v1 = eval_icv_ref!(ric1, oast, ns);
                 Ok(f(v0, v1))
             }
 
             IFunc_1S_NF(f, s, nic) => {
                 let mut args = Vec::with_capacity(nic.len());
                 for ic in nic {
-                    args.push(eval_ic_ref!(ic, oast, ns));
+                    args.push(eval_icv_ref!(ic, oast, ns));
                 }
                 Ok(f(&s, args))
             }
@@ -237,75 +232,69 @@ impl Evaler for Instruction {
             // IFunc(name, ics) => {
             //     let mut args = Vec::with_capacity(ics.len());
             //     for ic in ics {
-            //         args.push(eval_ic_ref!(ic, oast, ns));
+            //         args.push(eval_icv_ref!(ic, oast, ns));
             //     }
             //     eval_var!(ns, name, args)
             // }
             IFunc(name, _, ics) => {
                 let mut args = Vec::with_capacity(ics.len());
                 for ic in ics {
-                    args.push(eval_ic_ref!(ic, oast, ns));
+                    args.push(eval_icv_ref!(ic, oast, ns));
                 }
                 eval_var!(ns, name, args)
             }
 
             IMin(li, ric) => {
-                let left = eval_compiled_ref!(oast.get(*li), oast, ns);
-                let right = eval_ic_ref!(ric, oast, ns);
+                let left = eval_icv_ref!(li, oast, ns);
+                let right = eval_icv_ref!(ric, oast, ns);
                 Ok(left.min(right))
             }
             IMax(li, ric) => {
-                let left = eval_compiled_ref!(oast.get(*li), oast, ns);
-                let right = eval_ic_ref!(ric, oast, ns);
+                let left = eval_icv_ref!(li, oast, ns);
+                let right = eval_icv_ref!(ric, oast, ns);
                 Ok(left.max(right))
             }
 
-            IEQ(left, right) => {
-                Ok(f64_eq!(eval_ic_ref!(left, oast, ns), eval_ic_ref!(right, oast, ns)).into())
-            }
-            INE(left, right) => {
-                Ok(f64_ne!(eval_ic_ref!(left, oast, ns), eval_ic_ref!(right, oast, ns)).into())
-            }
+            IEQ(left, right) => Ok(f64_eq!(
+                eval_icv_ref!(left, oast, ns),
+                eval_icv_ref!(right, oast, ns)
+            )
+            .into()),
+            INE(left, right) => Ok(f64_ne!(
+                eval_icv_ref!(left, oast, ns),
+                eval_icv_ref!(right, oast, ns)
+            )
+            .into()),
             ILT(left, right) => {
-                Ok((eval_ic_ref!(left, oast, ns) < eval_ic_ref!(right, oast, ns)).into())
+                Ok((eval_icv_ref!(left, oast, ns) < eval_icv_ref!(right, oast, ns)).into())
             }
             ILTE(left, right) => {
-                Ok((eval_ic_ref!(left, oast, ns) <= eval_ic_ref!(right, oast, ns)).into())
+                Ok((eval_icv_ref!(left, oast, ns) <= eval_icv_ref!(right, oast, ns)).into())
             }
             IGTE(left, right) => {
-                Ok((eval_ic_ref!(left, oast, ns) >= eval_ic_ref!(right, oast, ns)).into())
+                Ok((eval_icv_ref!(left, oast, ns) >= eval_icv_ref!(right, oast, ns)).into())
             }
             IGT(left, right) => {
-                Ok((eval_ic_ref!(left, oast, ns) > eval_ic_ref!(right, oast, ns)).into())
+                Ok((eval_icv_ref!(left, oast, ns) > eval_icv_ref!(right, oast, ns)).into())
             }
 
-            INot(i) => Ok(f64_eq!(eval_compiled_ref!(oast.get(*i), oast, ns), 0.0).into()),
+            INot(i) => Ok(f64_eq!(eval_icv_ref!(i, oast, ns), 0.0).into()),
             IAND(li, ric) => {
-                let left = eval_compiled_ref!(oast.get(*li), oast, ns);
+                let left = eval_icv_ref!(li, oast, ns);
                 if f64_eq!(left, 0.0) {
                     Ok(left)
                 } else {
-                    Ok(eval_ic_ref!(ric, oast, ns))
+                    Ok(eval_icv_ref!(ric, oast, ns))
                 }
             }
             IOR(li, ric) => {
-                let left = eval_compiled_ref!(oast.get(*li), oast, ns);
+                let left = eval_icv_ref!(li, oast, ns);
                 if f64_ne!(left, 0.0) {
                     Ok(left)
                 } else {
-                    Ok(eval_ic_ref!(ric, oast, ns))
+                    Ok(eval_icv_ref!(ric, oast, ns))
                 }
             }
-            // IPrintFunc(fstr, args) => {
-            //     let mut v = Vec::with_capacity(args.len());
-            //     let mut last = 0.0;
-            //     for ic in args {
-            //         last = eval_ic_ref!(ic, oast, ns);
-            //         v.push(last);
-            //     }
-            //     eprintln!("{}", dyn_fmt::Arguments::new(fstr, &v));
-            //     Ok(last)
-            // }
 
             // Put these last because you should be using the eval_compiled*!() macros to eliminate function calls.
             IConst(c) => Ok(*c),
