@@ -48,7 +48,7 @@ pub(crate) fn func_1f<F: Float>(name: &str) -> Option<fn(F) -> F> {
         "asinh" => Some(F::asinh),
         "acosh" => Some(F::acosh),
         "atanh" => Some(F::atanh),
-
+        "clamp01" => Some(clamp01),
         _ => None,
     }
 }
@@ -68,6 +68,7 @@ pub(crate) fn func_2f<F: Float>(name: &str) -> Option<fn(F, F) -> F> {
 #[inline(always)]
 pub(crate) fn func_3f<F: Float>(name: &str) -> Option<fn(F, F, F) -> F> {
     match name {
+        "clamp" => Some(clamp),
         "lerp" => Some(lerp),
         "fit01" => Some(fit01),
 
@@ -127,4 +128,14 @@ pub fn fit01<F: Float>(x: F, min: F, max: F) -> F {
 #[inline(always)]
 pub fn lerp<F: Float>(a: F, b: F, t: F) -> F {
     a * (F::one() - t) + b * t
+}
+
+#[inline(always)]
+pub fn clamp<F: Float>(x: F, min: F, max: F) -> F {
+    x.min(max).max(min)
+}
+
+#[inline(always)]
+pub fn clamp01<F: Float>(x: F) -> F {
+    x.min(F::one()).max(F::zero())
 }

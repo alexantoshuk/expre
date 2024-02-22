@@ -1,4 +1,4 @@
-//! This module parses string expressions into an AST which can then be compiled or evaluated.
+//! This module parses string expressions into an Ast which can then be compiled or evaluated.
 //!
 //! # fasteval Algebra Grammar
 //! ```text
@@ -67,21 +67,21 @@ impl From<I> for usize {
     }
 }
 
-pub struct AST {
+pub struct Ast {
     pub(crate) exprs: Vec<Expr>,
     char_buf: String,
     #[cfg(feature = "unsafe-vars")]
     pub(crate) unsafe_vars: BTreeMap<String, *const f64>,
 }
 
-impl AST {
-    /// Creates a new default-sized `AST`.
+impl Ast {
+    /// Creates a new default-sized `Ast`.
     #[inline]
     pub fn new() -> Self {
         Self::with_capacity(64)
     }
 
-    /// Creates a new `AST` with the given capacity.
+    /// Creates a new `Ast` with the given capacity.
     #[inline]
     pub fn with_capacity(cap: usize) -> Self {
         Self {
@@ -92,14 +92,14 @@ impl AST {
         }
     }
 
-    /// Clears all data from [`AST`](struct.ParseAST.html) and [`AST`](struct.CompileAST.html).
+    /// Clears all data from [`Ast`](struct.ParseAST.html) and [`Ast`](struct.CompileAST.html).
     #[inline(always)]
     pub fn clear(&mut self) {
         self.exprs.clear();
     }
 
     /// Returns a reference to the [`Expr`](../parser/struct.Expr.html)
-    /// located at `expr_i` within the `AST.exprs'.
+    /// located at `expr_i` within the `Ast.exprs'.
     ///
     #[inline(always)]
     pub fn get_expr(&self, expr_i: I) -> &Expr {
@@ -113,7 +113,7 @@ impl AST {
     }
 
     /// Returns a reference to the [`Value`](../parser/enum.Value.html)
-    /// located at `val_i` within the `AST.vals'.
+    /// located at `val_i` within the `Ast.vals'.
     ///
     #[inline(always)]
     pub fn get_val(&self, val_i: I) -> &Value {
@@ -121,11 +121,11 @@ impl AST {
         &self.exprs.get(val_i.0).unwrap().0
     }
 
-    /// Appends an `Expr` to `AST.exprs`.
+    /// Appends an `Expr` to `Ast.exprs`.
     ///
     /// # Errors
     ///
-    /// If `AST.exprs` is already full, a `ASTOverflow` error is returned.
+    /// If `Ast.exprs` is already full, a `ASTOverflow` error is returned.
     ///
     #[inline(always)]
     pub(crate) fn push_expr(&mut self, expr: Expr) -> Result<I, Error> {
@@ -155,9 +155,9 @@ impl AST {
     }
 }
 
-impl Debug for AST {
+impl Debug for Ast {
     fn fmt(&self, f: &mut fmt::Formatter) -> Result<(), fmt::Error> {
-        write!(f, "AST[")?;
+        write!(f, "Ast[")?;
         write_indexed_list(f, &self.exprs)?;
         write!(f, "]")?;
         Ok(())
@@ -165,19 +165,19 @@ impl Debug for AST {
 }
 
 pub trait ParseExpr {
-    fn parse_expr(&self, ast: &mut AST) -> Result<(), Error>;
+    fn parse_expr(&self, ast: &mut Ast) -> Result<(), Error>;
 }
 
 impl<S: AsRef<str>> ParseExpr for S {
     #[inline(always)]
-    fn parse_expr(&self, ast: &mut AST) -> Result<(), Error> {
+    fn parse_expr(&self, ast: &mut Ast) -> Result<(), Error> {
         super::parse(self, ast)
     }
 }
 
 pub(crate) type ExprPair = (BinaryOp, Value);
 
-/// An `Expr` is the top node of a parsed AST.
+/// An `Expr` is the top node of a parsed Ast.
 ///
 /// It can be `compile()`d or `eval()`d.
 #[derive(PartialEq)]
@@ -339,9 +339,9 @@ fn is_varname_byte_opt(bo: Option<u8>, i: usize) -> bool {
     }
 }
 
-/// Use this function to parse an expression String.  The `AST` will be cleared first.
+/// Use this function to parse an expression String. The `Ast` will be cleared first.
 #[inline]
-pub fn parse<'a, S: AsRef<str>>(expr_str: S, ast: &'a mut AST) -> Result<(), Error> {
+pub fn parse<'a, S: AsRef<str>>(expr_str: S, ast: &'a mut Ast) -> Result<(), Error> {
     let expr_str = expr_str.as_ref();
     ast.clear();
     if expr_str.len() > DEFAULT_EXPR_LEN_LIMIT {
@@ -351,7 +351,7 @@ pub fn parse<'a, S: AsRef<str>>(expr_str: S, ast: &'a mut AST) -> Result<(), Err
     read_expr(ast, &mut bs, 0, true).map(|_| ())
 }
 
-fn read_expr(ast: &mut AST, bs: &mut &[u8], depth: usize, expect_eof: bool) -> Result<I, Error> {
+fn read_expr(ast: &mut Ast, bs: &mut &[u8], depth: usize, expect_eof: bool) -> Result<I, Error> {
     if depth > DEFAULT_EXPR_DEPTH_LIMIT {
         return Err(Error::TooDeep);
     }
@@ -379,7 +379,7 @@ fn read_expr(ast: &mut AST, bs: &mut &[u8], depth: usize, expect_eof: bool) -> R
     Ok(ast.push_expr(Expr(first, pairs))?)
 }
 
-fn read_value(ast: &mut AST, bs: &mut &[u8], depth: usize) -> Result<Value, Error> {
+fn read_value(ast: &mut Ast, bs: &mut &[u8], depth: usize) -> Result<Value, Error> {
     if depth > DEFAULT_EXPR_DEPTH_LIMIT {
         return Err(Error::TooDeep);
     }
@@ -400,7 +400,7 @@ fn read_value(ast: &mut AST, bs: &mut &[u8], depth: usize) -> Result<Value, Erro
     Err(Error::InvalidValue)
 }
 
-fn read_const(ast: &mut AST, bs: &mut &[u8]) -> Result<Option<f64>, Error> {
+fn read_const(ast: &mut Ast, bs: &mut &[u8]) -> Result<Option<f64>, Error> {
     spaces!(bs);
 
     let mut toklen = 0;
@@ -488,7 +488,7 @@ fn read_const(ast: &mut AST, bs: &mut &[u8]) -> Result<Option<f64>, Error> {
     Ok(Some(val))
 }
 
-fn read_unaryop(ast: &mut AST, bs: &mut &[u8], depth: usize) -> Result<Option<UnaryOp>, Error> {
+fn read_unaryop(ast: &mut Ast, bs: &mut &[u8], depth: usize) -> Result<Option<UnaryOp>, Error> {
     spaces!(bs);
     match peek!(bs) {
         None => Ok(None), // Err(KErr::new("EOF at UnaryOp position")), -- Instead of erroring, let the higher level decide what to do.
@@ -609,7 +609,7 @@ fn read_binaryop(bs: &mut &[u8]) -> Result<Option<BinaryOp>, Error> {
     }
 }
 
-fn read_callable(ast: &mut AST, bs: &mut &[u8], depth: usize) -> Result<Option<Value>, Error> {
+fn read_callable(ast: &mut Ast, bs: &mut &[u8], depth: usize) -> Result<Option<Value>, Error> {
     match read_varname(bs)? {
         None => Ok(None),
         Some(varname) => {
@@ -666,7 +666,7 @@ fn read_open_parenthesis(bs: &mut &[u8]) -> Result<Option<u8>, Error> {
 
 fn read_func(
     fname: String,
-    ast: &mut AST,
+    ast: &mut Ast,
     bs: &mut &[u8],
     depth: usize,
     open_parenth: u8,
@@ -772,7 +772,7 @@ fn read_string(bs: &mut &[u8]) -> Result<Option<String>, Error> {
 #[cfg(test)]
 mod test {
     use super::*;
-    use crate::parser::AST;
+    use crate::parser::Ast;
 
     #[test]
     fn test_util() {
@@ -833,7 +833,7 @@ mod test {
     fn test_priv_tests() {
         assert!(is_varname_byte_opt(Some(b'a'), 0));
 
-        let mut ast = AST::new();
+        let mut ast = Ast::new();
 
         {
             let bsarr = b"12.34";

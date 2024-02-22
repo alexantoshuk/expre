@@ -1,4 +1,4 @@
-//! This module compiles parsed `Expr`s into an optimized AST node called an `Instruction`.
+//! This module compiles parsed `Expr`s into an optimized Ast node called an `Instruction`.
 //! The compiled form is much faster, especially for constants.
 //!
 //! # Compile-time Optimizations
@@ -21,7 +21,7 @@
 //! * Logical operator short-circuits are applied and no-op branches are discarded.
 //!
 //! ## Optimized Memory Layout and Execution
-//! * Variable-length `Expr`/`Value` AST nodes are converted into constant-sized `Instruction` nodes.
+//! * Variable-length `Expr`/`Value` Ast nodes are converted into constant-sized `Instruction` nodes.
 //! * The `ICV` enumeration helps to eliminate expensive function calls.
 
 use crate::builtins;
@@ -30,11 +30,11 @@ use crate::parser::StdFunc::EUnsafeVar;
 
 // pub use crate::parser::I;
 use crate::parser::{
+    Ast,
     BinaryOp::{self, *},
     Expr, ExprPair,
     UnaryOp::{self, *},
     Value::{self, *},
-    AST,
 };
 use crate::write_indexed_list;
 use std::fmt::{self, Debug};
@@ -65,28 +65,28 @@ impl From<usize> for ICV {
     }
 }
 
-impl AST {
-    pub fn compile(&self, oast: &mut OAST) {
-        oast.clear();
+impl Ast {
+    pub fn compile(&self, cexpr: &mut CExpr) {
+        cexpr.clear();
         let expr = self.exprs.last().unwrap();
-        let instr = expr.compile(self, oast);
+        let instr = expr.compile(self, cexpr);
 
-        oast.instrs.push(instr);
+        cexpr.instrs.push(instr);
     }
 }
-/// `OAST` is where `compile()` results are stored.
-pub struct OAST {
+/// `CExpr` is where `compile()` results are stored.
+pub struct CExpr {
     pub(crate) instrs: Vec<Instruction>,
 }
 
-impl OAST {
-    /// Creates a new default-sized `AST`.
+impl CExpr {
+    /// Creates a new default-sized `Ast`.
     #[inline]
     pub fn new() -> Self {
         Self::with_capacity(32)
     }
 
-    /// Creates a new `AST` with the given capacity.
+    /// Creates a new `Ast` with the given capacity.
     #[inline]
     pub fn with_capacity(cap: usize) -> Self {
         Self {
@@ -100,7 +100,7 @@ impl OAST {
     }
 
     /// Returns a reference to the [`Instruction`](../compiler/enum.Instruction.html)
-    /// located at `instr_i` within the `OAST.instrs'.
+    /// located at `instr_i` within the `CExpr.instrs'.
     ///
     /// If `instr_i` is out-of-bounds, a reference to a default `Instruction` is returned.
     ///
@@ -118,7 +118,7 @@ impl OAST {
         }
     }
 
-    /// Appends an `Instruction` to `OAST.instrs`.
+    /// Appends an `Instruction` to `CExpr.instrs`.
     #[inline(always)]
     fn push(&mut self, instr: Instruction) -> usize {
         let i = self.instrs.len();
@@ -126,29 +126,29 @@ impl OAST {
         i
     }
 
-    /// Removes an `Instruction` from `OAST.instrs` as efficiently as possible.
+    /// Removes an `Instruction` from `CExpr.instrs` as efficiently as possible.
     #[inline(always)]
     fn pop(&mut self) -> Instruction {
         self.instrs.pop().unwrap()
     }
 
-    /// Clears all data from `OAST.instrs`.
+    /// Clears all data from `CExpr.instrs`.
     #[inline(always)]
     pub fn clear(&mut self) {
         self.instrs.clear();
     }
 }
 
-impl Debug for OAST {
+impl Debug for CExpr {
     fn fmt(&self, f: &mut fmt::Formatter) -> Result<(), fmt::Error> {
-        write!(f, "OAST[")?;
+        write!(f, "CExpr[")?;
         write_indexed_list(f, &self.instrs)?;
         write!(f, "]")?;
         Ok(())
     }
 }
 
-/// An `Instruction` is an optimized AST node resulting from compilation.
+/// An `Instruction` is an optimized Ast node resulting from compilation.
 #[allow(non_camel_case_types)]
 #[derive(Debug, PartialEq)]
 pub enum Instruction {
@@ -193,6 +193,7 @@ pub enum Instruction {
     IFunc(String, Vec<String>, Vec<ICV>),
     IFunc_1F(fn(f64) -> f64, ICV),
     IFunc_2F(fn(f64, f64) -> f64, ICV, ICV),
+    IFunc_3F(fn(f64, f64, f64) -> f64, ICV, ICV, ICV),
     IFunc_1S_NF(fn(&str, Vec<f64>) -> f64, String, Vec<ICV>),
 
     IMin(ICV, ICV),
@@ -205,7 +206,7 @@ pub trait Compiler {
     /// Turns a parsed `Expr` into a compiled `Instruction`.
     ///
     /// Cannot fail, unless you run out of memory.
-    fn compile(&self, ast: &AST, oast: &mut OAST) -> Instruction;
+    fn compile(&self, ast: &Ast, cexpr: &mut CExpr) -> Instruction;
 }
 
 #[derive(Debug)]
@@ -290,32 +291,32 @@ macro_rules! f64_ne {
     };
 }
 #[inline(always)]
-fn neg_wrap(instr: Instruction, oast: &mut OAST) -> Instruction {
+fn neg_wrap(instr: Instruction, cexpr: &mut CExpr) -> Instruction {
     match instr {
         IConst(c) => IConst(-c),
-        INeg(_) => oast.pop(),
-        _ => INeg(oast.instr_to_icv(instr)),
+        INeg(_) => cexpr.pop(),
+        _ => INeg(cexpr.instr_to_icv(instr)),
     }
 }
 #[inline(always)]
-fn not_wrap(instr: Instruction, oast: &mut OAST) -> Instruction {
+fn not_wrap(instr: Instruction, cexpr: &mut CExpr) -> Instruction {
     match instr {
         IConst(c) => IConst((f64_eq!(c, 0.0)).into()),
-        INot(_) => oast.pop(),
-        _ => INot(oast.instr_to_icv(instr)),
+        INot(_) => cexpr.pop(),
+        _ => INot(cexpr.instr_to_icv(instr)),
     }
 }
 #[inline(always)]
-fn inv_wrap(instr: Instruction, oast: &mut OAST) -> Instruction {
+fn inv_wrap(instr: Instruction, cexpr: &mut CExpr) -> Instruction {
     match instr {
         IConst(c) => IConst(1.0 / c),
-        IInv(_) => oast.pop(),
-        _ => IInv(oast.instr_to_icv(instr)),
+        IInv(_) => cexpr.pop(),
+        _ => IInv(cexpr.instr_to_icv(instr)),
     }
 }
 
 #[inline(always)]
-fn compile_mul(instrs: Vec<Instruction>, oast: &mut OAST) -> Instruction {
+fn compile_mul(instrs: Vec<Instruction>, cexpr: &mut CExpr) -> Instruction {
     let mut out = IConst(1.0);
     let mut out_set = false;
     let mut const_prod = 1.0;
@@ -327,7 +328,7 @@ fn compile_mul(instrs: Vec<Instruction>, oast: &mut OAST) -> Instruction {
             const_prod *= c; // Floats don't overflow.
         } else {
             if out_set {
-                out = IMul(oast.instr_to_icv(out), oast.instr_to_icv(instr));
+                out = IMul(cexpr.instr_to_icv(out), cexpr.instr_to_icv(instr));
             } else {
                 out = instr;
                 out_set = true;
@@ -336,7 +337,7 @@ fn compile_mul(instrs: Vec<Instruction>, oast: &mut OAST) -> Instruction {
     }
     if f64_ne!(const_prod, 1.0) {
         if out_set {
-            out = IMul(oast.instr_to_icv(out), ICV::IConst(const_prod));
+            out = IMul(cexpr.instr_to_icv(out), ICV::IConst(const_prod));
         } else {
             out = IConst(const_prod);
         }
@@ -345,7 +346,7 @@ fn compile_mul(instrs: Vec<Instruction>, oast: &mut OAST) -> Instruction {
 }
 
 #[inline(always)]
-fn compile_add(instrs: Vec<Instruction>, oast: &mut OAST) -> Instruction {
+fn compile_add(instrs: Vec<Instruction>, cexpr: &mut CExpr) -> Instruction {
     let mut out = IConst(0.0);
     let mut out_set = false;
     let mut const_sum = 0.0;
@@ -357,7 +358,7 @@ fn compile_add(instrs: Vec<Instruction>, oast: &mut OAST) -> Instruction {
             const_sum += c; // Floats don't overflow.
         } else {
             if out_set {
-                out = IAdd(oast.instr_to_icv(out), oast.instr_to_icv(instr));
+                out = IAdd(cexpr.instr_to_icv(out), cexpr.instr_to_icv(instr));
             } else {
                 out = instr;
                 out_set = true;
@@ -366,7 +367,7 @@ fn compile_add(instrs: Vec<Instruction>, oast: &mut OAST) -> Instruction {
     }
     if f64_ne!(const_sum, 0.0) {
         if out_set {
-            out = IAdd(oast.instr_to_icv(out), ICV::IConst(const_sum));
+            out = IAdd(cexpr.instr_to_icv(out), ICV::IConst(const_sum));
         } else {
             out = IConst(const_sum);
         }
@@ -375,13 +376,13 @@ fn compile_add(instrs: Vec<Instruction>, oast: &mut OAST) -> Instruction {
 }
 
 // Can't inline recursive functions:
-fn push_mul_leaves(instrs: &mut Vec<Instruction>, oast: &mut OAST, li: ICV, ric: ICV) {
+fn push_mul_leaves(instrs: &mut Vec<Instruction>, cexpr: &mut CExpr, li: ICV, ric: ICV) {
     // Take 'r' before 'l' for a chance for more efficient memory usage:
     match ric {
         ICV::I(_) => {
-            let instr = oast.pop();
+            let instr = cexpr.pop();
             if let IMul(rli, rric) = instr {
-                push_mul_leaves(instrs, oast, rli, rric);
+                push_mul_leaves(instrs, cexpr, rli, rric);
             } else {
                 instrs.push(instr);
             }
@@ -390,21 +391,21 @@ fn push_mul_leaves(instrs: &mut Vec<Instruction>, oast: &mut OAST, li: ICV, ric:
         ICV::IVar(c) => instrs.push(IVar(c)),
     };
 
-    let instr = oast.pop();
+    let instr = cexpr.pop();
     if let IMul(lli, lric) = instr {
-        push_mul_leaves(instrs, oast, lli, lric);
+        push_mul_leaves(instrs, cexpr, lli, lric);
     } else {
         instrs.push(instr);
     }
 }
 
-fn push_add_leaves(instrs: &mut Vec<Instruction>, oast: &mut OAST, li: ICV, ric: ICV) {
+fn push_add_leaves(instrs: &mut Vec<Instruction>, cexpr: &mut CExpr, li: ICV, ric: ICV) {
     // Take 'r' before 'l' for a chance for more efficient memory usage:
     match ric {
         ICV::I(_) => {
-            let instr = oast.pop();
+            let instr = cexpr.pop();
             if let IAdd(rli, rric) = instr {
-                push_add_leaves(instrs, oast, rli, rric);
+                push_add_leaves(instrs, cexpr, rli, rric);
             } else {
                 instrs.push(instr);
             }
@@ -413,16 +414,16 @@ fn push_add_leaves(instrs: &mut Vec<Instruction>, oast: &mut OAST, li: ICV, ric:
         ICV::IVar(c) => instrs.push(IVar(c)),
     };
 
-    let instr = oast.pop();
+    let instr = cexpr.pop();
     if let IAdd(lli, lric) = instr {
-        push_add_leaves(instrs, oast, lli, lric);
+        push_add_leaves(instrs, cexpr, lli, lric);
     } else {
         instrs.push(instr);
     }
 }
 
 impl Compiler for ExprSlice<'_> {
-    fn compile(&self, ast: &AST, oast: &mut OAST) -> Instruction {
+    fn compile(&self, ast: &Ast, cexpr: &mut CExpr) -> Instruction {
         // Associative:  (2+3)+4 = 2+(3+4)
         // Commutative:  1+2 = 2+1
         //
@@ -441,7 +442,7 @@ impl Compiler for ExprSlice<'_> {
         // Find the lowest-priority BinaryOp:
         let mut lowest_op = match self.1.first() {
             Some(p0) => p0.0,
-            None => return self.0.compile(ast, oast),
+            None => return self.0.compile(ast, cexpr),
         };
         for exprpair in self.1.iter() {
             if exprpair.0 < lowest_op {
@@ -460,10 +461,10 @@ impl Compiler for ExprSlice<'_> {
             let mut ops = Vec::<&BinaryOp>::with_capacity(4);
             let mut xss = Vec::<ExprSlice>::with_capacity(ops.len() + 1);
             self.split_multi(&[EEQ, ENE, ELT, EGT, ELTE, EGTE], &mut xss, &mut ops);
-            let mut out = xss.first().unwrap().compile(ast, oast);
+            let mut out = xss.first().unwrap().compile(ast, cexpr);
 
             for (i, op) in ops.into_iter().enumerate() {
-                let instr = xss.get(i + 1).unwrap().compile(ast, oast);
+                let instr = xss.get(i + 1).unwrap().compile(ast, cexpr);
 
                 if let IConst(l) = out {
                     if let IConst(r) = instr {
@@ -481,12 +482,12 @@ impl Compiler for ExprSlice<'_> {
                 }
 
                 out = match op {
-                    EEQ => IEQ(oast.instr_to_icv(out), oast.instr_to_icv(instr)),
-                    ENE => INE(oast.instr_to_icv(out), oast.instr_to_icv(instr)),
-                    ELT => ILT(oast.instr_to_icv(out), oast.instr_to_icv(instr)),
-                    EGT => IGT(oast.instr_to_icv(out), oast.instr_to_icv(instr)),
-                    ELTE => ILTE(oast.instr_to_icv(out), oast.instr_to_icv(instr)),
-                    EGTE => IGTE(oast.instr_to_icv(out), oast.instr_to_icv(instr)),
+                    EEQ => IEQ(cexpr.instr_to_icv(out), cexpr.instr_to_icv(instr)),
+                    ENE => INE(cexpr.instr_to_icv(out), cexpr.instr_to_icv(instr)),
+                    ELT => ILT(cexpr.instr_to_icv(out), cexpr.instr_to_icv(instr)),
+                    EGT => IGT(cexpr.instr_to_icv(out), cexpr.instr_to_icv(instr)),
+                    ELTE => ILTE(cexpr.instr_to_icv(out), cexpr.instr_to_icv(instr)),
+                    EGTE => IGTE(cexpr.instr_to_icv(out), cexpr.instr_to_icv(instr)),
                     _ => unreachable!(),
                 };
             }
@@ -500,9 +501,9 @@ impl Compiler for ExprSlice<'_> {
                 let mut out = IConst(0.0);
                 let mut out_set = false;
                 for xs in xss.iter() {
-                    let instr = xs.compile(ast, oast);
+                    let instr = xs.compile(ast, cexpr);
                     if out_set {
-                        out = IOR(oast.instr_to_icv(out), oast.instr_to_icv(instr));
+                        out = IOR(cexpr.instr_to_icv(out), cexpr.instr_to_icv(instr));
                     } else {
                         if let IConst(c) = instr {
                             if f64_ne!(c, 0.0) {
@@ -524,7 +525,7 @@ impl Compiler for ExprSlice<'_> {
                 let mut out = IConst(1.0);
                 let mut out_set = false;
                 for xs in xss.iter() {
-                    let instr = xs.compile(ast, oast);
+                    let instr = xs.compile(ast, cexpr);
                     if let IConst(c) = instr {
                         if f64_eq!(c, 0.0) {
                             return instr;
@@ -535,7 +536,7 @@ impl Compiler for ExprSlice<'_> {
                             // If we get here, we know that the const is non-zero.
                             out = instr;
                         } else {
-                            out = IAND(oast.instr_to_icv(out), oast.instr_to_icv(instr));
+                            out = IAND(cexpr.instr_to_icv(out), cexpr.instr_to_icv(instr));
                         }
                     } else {
                         out = instr;
@@ -549,14 +550,14 @@ impl Compiler for ExprSlice<'_> {
                 self.split(EAdd, &mut xss);
                 let mut instrs = Vec::<Instruction>::with_capacity(xss.len());
                 for xs in xss {
-                    let instr = xs.compile(ast, oast);
+                    let instr = xs.compile(ast, cexpr);
                     if let IAdd(li, ric) = instr {
-                        push_add_leaves(&mut instrs, oast, li, ric); // Flatten nested structures like "x - 1 + 2 - 3".
+                        push_add_leaves(&mut instrs, cexpr, li, ric); // Flatten nested structures like "x - 1 + 2 - 3".
                     } else {
                         instrs.push(instr);
                     }
                 }
-                compile_add(instrs, oast)
+                compile_add(instrs, cexpr)
             }
             ESub => {
                 // Note: We don't need to push_add_leaves from here because Sub has a higher precedence than Add.
@@ -565,28 +566,28 @@ impl Compiler for ExprSlice<'_> {
                 self.split(ESub, &mut xss);
                 let mut instrs = Vec::<Instruction>::with_capacity(xss.len());
                 for (i, xs) in xss.into_iter().enumerate() {
-                    let instr = xs.compile(ast, oast);
+                    let instr = xs.compile(ast, cexpr);
                     if i == 0 {
                         instrs.push(instr);
                     } else {
-                        instrs.push(neg_wrap(instr, oast));
+                        instrs.push(neg_wrap(instr, cexpr));
                     }
                 }
-                compile_add(instrs, oast)
+                compile_add(instrs, cexpr)
             }
             EMul => {
                 let mut xss = Vec::<ExprSlice>::with_capacity(4);
                 self.split(EMul, &mut xss);
                 let mut instrs = Vec::<Instruction>::with_capacity(xss.len());
                 for xs in xss {
-                    let instr = xs.compile(ast, oast);
+                    let instr = xs.compile(ast, cexpr);
                     if let IMul(li, ric) = instr {
-                        push_mul_leaves(&mut instrs, oast, li, ric); // Flatten nested structures like "deg/360 * 2*pi()".
+                        push_mul_leaves(&mut instrs, cexpr, li, ric); // Flatten nested structures like "deg/360 * 2*pi()".
                     } else {
                         instrs.push(instr);
                     }
                 }
-                compile_mul(instrs, oast)
+                compile_mul(instrs, cexpr)
             }
             EDiv => {
                 // Note: We don't need to push_mul_leaves from here because Div has a higher precedence than Mul.
@@ -595,14 +596,14 @@ impl Compiler for ExprSlice<'_> {
                 self.split(EDiv, &mut xss);
                 let mut instrs = Vec::<Instruction>::with_capacity(xss.len());
                 for (i, xs) in xss.into_iter().enumerate() {
-                    let instr = xs.compile(ast, oast);
+                    let instr = xs.compile(ast, cexpr);
                     if i == 0 {
                         instrs.push(instr);
                     } else {
-                        instrs.push(inv_wrap(instr, oast));
+                        instrs.push(inv_wrap(instr, cexpr));
                     }
                 }
-                compile_mul(instrs, oast)
+                compile_mul(instrs, cexpr)
             }
 
             EMod => {
@@ -611,7 +612,7 @@ impl Compiler for ExprSlice<'_> {
                 let mut out = IConst(0.0);
                 let mut out_set = false;
                 for xs in xss.iter() {
-                    let instr = xs.compile(ast, oast);
+                    let instr = xs.compile(ast, cexpr);
                     if out_set {
                         if let IConst(dividend) = out {
                             if let IConst(divisor) = instr {
@@ -619,7 +620,7 @@ impl Compiler for ExprSlice<'_> {
                                 continue;
                             }
                         }
-                        out = IMod(oast.instr_to_icv(out), oast.instr_to_icv(instr));
+                        out = IMod(cexpr.instr_to_icv(out), cexpr.instr_to_icv(instr));
                     } else {
                         out = instr;
                         out_set = true;
@@ -634,7 +635,7 @@ impl Compiler for ExprSlice<'_> {
                 let mut out = IConst(0.0);
                 let mut out_set = false;
                 for xs in xss.into_iter().rev() {
-                    let instr = xs.compile(ast, oast);
+                    let instr = xs.compile(ast, cexpr);
                     if out_set {
                         if let IConst(power) = out {
                             if let IConst(base) = instr {
@@ -642,7 +643,7 @@ impl Compiler for ExprSlice<'_> {
                                 continue;
                             }
                         }
-                        out = IExp(oast.instr_to_icv(instr), oast.instr_to_icv(out));
+                        out = IExp(cexpr.instr_to_icv(instr), cexpr.instr_to_icv(out));
                     } else {
                         out = instr;
                         out_set = true;
@@ -657,42 +658,42 @@ impl Compiler for ExprSlice<'_> {
 }
 
 impl Compiler for Expr {
-    fn compile(&self, ast: &AST, oast: &mut OAST) -> Instruction {
+    fn compile(&self, ast: &Ast, cexpr: &mut CExpr) -> Instruction {
         let top = ExprSlice::from_expr(&self);
-        top.compile(ast, oast)
+        top.compile(ast, cexpr)
     }
 }
 
 impl Compiler for UnaryOp {
-    fn compile(&self, ast: &AST, oast: &mut OAST) -> Instruction {
+    fn compile(&self, ast: &Ast, cexpr: &mut CExpr) -> Instruction {
         match self {
-            EPos(i) => ast.get_val(*i).compile(ast, oast),
+            EPos(i) => ast.get_val(*i).compile(ast, cexpr),
             ENeg(i) => {
-                let instr = ast.get_val(*i).compile(ast, oast);
+                let instr = ast.get_val(*i).compile(ast, cexpr);
                 if let IConst(c) = instr {
                     IConst(-c)
                 } else {
-                    neg_wrap(instr, oast)
+                    neg_wrap(instr, cexpr)
                 }
             }
             ENot(i) => {
-                let instr = ast.get_val(*i).compile(ast, oast);
+                let instr = ast.get_val(*i).compile(ast, cexpr);
                 if let IConst(c) = instr {
                     IConst((f64_eq!(c, 0.0)).into())
                 } else {
-                    not_wrap(instr, oast)
+                    not_wrap(instr, cexpr)
                 }
             }
-            EParen(i) => ast.get_expr(*i).compile(ast, oast),
+            EParen(i) => ast.get_expr(*i).compile(ast, cexpr),
         }
     }
 }
 
 impl Compiler for Value {
-    fn compile(&self, ast: &AST, oast: &mut OAST) -> Instruction {
+    fn compile(&self, ast: &Ast, cexpr: &mut CExpr) -> Instruction {
         match self {
             EConst(c) => IConst(*c),
-            EUnaryOp(u) => u.compile(ast, oast),
+            EUnaryOp(u) => u.compile(ast, cexpr),
 
             EVar(name) => {
                 if let Some(c) = builtins::constant(name) {
@@ -711,10 +712,10 @@ impl Compiler for Value {
                 match (name.as_str(), sargs.as_slice(), args.as_slice()) {
                     //Special case for 'min' function
                     ("min", [], [fi, is @ ..]) => {
-                        let first = ast.get_expr(*fi).compile(ast, oast);
+                        let first = ast.get_expr(*fi).compile(ast, cexpr);
                         let mut rest = Vec::<Instruction>::with_capacity(is.len());
                         for i in is {
-                            rest.push(ast.get_expr(*i).compile(ast, oast));
+                            rest.push(ast.get_expr(*i).compile(ast, cexpr));
                         }
                         let mut out = IConst(0.0);
                         let mut out_set = false;
@@ -740,7 +741,7 @@ impl Compiler for Value {
                                 }
                             } else {
                                 if out_set {
-                                    out = IMin(oast.instr_to_icv(out), oast.instr_to_icv(instr));
+                                    out = IMin(cexpr.instr_to_icv(out), cexpr.instr_to_icv(instr));
                                 } else {
                                     out = instr;
                                     out_set = true;
@@ -749,7 +750,7 @@ impl Compiler for Value {
                         }
                         if const_min_set {
                             if out_set {
-                                out = IMin(oast.instr_to_icv(out), ICV::IConst(const_min));
+                                out = IMin(cexpr.instr_to_icv(out), ICV::IConst(const_min));
                             } else {
                                 out = IConst(const_min);
                                 // out_set = true;  // Comment out so the compiler doesn't complain about unused assignments.
@@ -761,10 +762,10 @@ impl Compiler for Value {
 
                     // Special case for 'max' function
                     ("max", [], [fi, is @ ..]) => {
-                        let first = ast.get_expr(*fi).compile(ast, oast);
+                        let first = ast.get_expr(*fi).compile(ast, cexpr);
                         let mut rest = Vec::<Instruction>::with_capacity(is.len());
                         for i in is {
-                            rest.push(ast.get_expr(*i).compile(ast, oast));
+                            rest.push(ast.get_expr(*i).compile(ast, cexpr));
                         }
                         let mut out = IConst(0.0);
                         let mut out_set = false;
@@ -790,7 +791,7 @@ impl Compiler for Value {
                                 }
                             } else {
                                 if out_set {
-                                    out = IMax(oast.instr_to_icv(out), oast.instr_to_icv(instr));
+                                    out = IMax(cexpr.instr_to_icv(out), cexpr.instr_to_icv(instr));
                                 } else {
                                     out = instr;
                                     out_set = true;
@@ -799,7 +800,7 @@ impl Compiler for Value {
                         }
                         if const_max_set {
                             if out_set {
-                                out = IMax(oast.instr_to_icv(out), ICV::IConst(const_max));
+                                out = IMax(cexpr.instr_to_icv(out), ICV::IConst(const_max));
                             } else {
                                 out = IConst(const_max);
                                 // out_set = true;  // Comment out so the compiler doesn't complain about unused assignments.
@@ -810,29 +811,50 @@ impl Compiler for Value {
                     }
                     (_, [], [arg]) => {
                         if let Some(f) = builtins::func_1f(name) {
-                            let instr = ast.get_expr(*arg).compile(ast, oast);
+                            let instr = ast.get_expr(*arg).compile(ast, cexpr);
                             return {
                                 if let IConst(c) = instr {
                                     IConst(f(c))
                                 } else {
-                                    // IFunc_1F(f, oast.push(instr))
-                                    IFunc_1F(f, oast.instr_to_icv(instr))
+                                    // IFunc_1F(f, cexpr.push(instr))
+                                    IFunc_1F(f, cexpr.instr_to_icv(instr))
                                 }
                             };
                         }
                     }
                     (_, [], [arg0, arg1]) => {
                         if let Some(f) = builtins::func_2f(name) {
-                            let instr0 = ast.get_expr(*arg0).compile(ast, oast);
-                            let instr1 = ast.get_expr(*arg1).compile(ast, oast);
+                            let instr0 = ast.get_expr(*arg0).compile(ast, cexpr);
+                            let instr1 = ast.get_expr(*arg1).compile(ast, cexpr);
                             return {
                                 if let (IConst(c0), IConst(c1)) = (&instr0, &instr1) {
                                     IConst(f(*c0, *c1))
                                 } else {
                                     IFunc_2F(
                                         f,
-                                        oast.instr_to_icv(instr0),
-                                        oast.instr_to_icv(instr1),
+                                        cexpr.instr_to_icv(instr0),
+                                        cexpr.instr_to_icv(instr1),
+                                    )
+                                }
+                            };
+                        }
+                    }
+                    (_, [], [arg0, arg1, arg2]) => {
+                        if let Some(f) = builtins::func_3f(name) {
+                            let instr0 = ast.get_expr(*arg0).compile(ast, cexpr);
+                            let instr1 = ast.get_expr(*arg1).compile(ast, cexpr);
+                            let instr2 = ast.get_expr(*arg2).compile(ast, cexpr);
+                            return {
+                                if let (IConst(c0), IConst(c1), IConst(c2)) =
+                                    (&instr0, &instr1, &instr2)
+                                {
+                                    IConst(f(*c0, *c1, *c2))
+                                } else {
+                                    IFunc_3F(
+                                        f,
+                                        cexpr.instr_to_icv(instr0),
+                                        cexpr.instr_to_icv(instr1),
+                                        cexpr.instr_to_icv(instr2),
                                     )
                                 }
                             };
@@ -842,8 +864,8 @@ impl Compiler for Value {
                         if let Some(f) = builtins::func_1s_nf(name) {
                             let mut iargs = Vec::<ICV>::with_capacity(args.len());
                             for i in args {
-                                let instr = ast.get_expr(*i).compile(ast, oast);
-                                iargs.push(oast.instr_to_icv(instr));
+                                let instr = ast.get_expr(*i).compile(ast, cexpr);
+                                iargs.push(cexpr.instr_to_icv(instr));
                             }
                             return IFunc_1S_NF(f, sarg.clone(), iargs);
                         }
@@ -853,8 +875,8 @@ impl Compiler for Value {
 
                 let mut iargs = Vec::<ICV>::with_capacity(args.len());
                 for i in args {
-                    let instr = ast.get_expr(*i).compile(ast, oast);
-                    iargs.push(oast.instr_to_icv(instr));
+                    let instr = ast.get_expr(*i).compile(ast, cexpr);
+                    iargs.push(cexpr.instr_to_icv(instr));
                 }
                 IFunc(name.clone(), sargs.clone(), iargs)
             }

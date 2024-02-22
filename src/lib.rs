@@ -103,7 +103,7 @@
 //! ## Easy evaluation
 //! The [`eval()`](ez/fn.eval.html) function performs the entire allocation-parse-eval process
 //! for you.  It is slightly inefficient because it always allocates a
-//! fresh [`AST`](slab/index.html), but it is very simple to use:
+//! fresh [`Ast`](slab/index.html), but it is very simple to use:
 //!
 //! ```
 //! // In case you didn't know, Rust allows `main()` to return a `Result`.
@@ -218,9 +218,9 @@
 //! }
 //! ```
 //!
-//! ## Re-use the AST to go faster
+//! ## Re-use the Ast to go faster
 //! If we perform the parse and eval ourselves (without relying on the 'ez'
-//! interface), then we can re-use the [`AST`](slab/index.html) allocation for
+//! interface), then we can re-use the [`Ast`](slab/index.html) allocation for
 //! subsequent parsing and evaluations.  This avoids a significant amount of
 //! slow memory operations:
 //!
@@ -237,8 +237,8 @@
 //! use std::collections::BTreeMap;
 //! use fasteval::*;    // use this trait so we can call eval().
 //! fn main() -> Result<(), fasteval::Error> {
-//!     let mut ast = fasteval::AST::new();
-//!     let mut oast = fasteval::OAST::new();
+//!     let mut ast = fasteval::Ast::new();
+//!     let mut oast = fasteval::CExpr::new();
 //!     let mut map = BTreeMap::new();
 //!
 //!     let expr_str = "sin(deg/360 * 2*pi())";
@@ -266,8 +266,8 @@
 //! ```
 //! use fasteval::*;
 //! fn main() -> Result<(), fasteval::Error> {
-//!     let mut ast = fasteval::AST::new();
-//!     let mut oast = fasteval::OAST::new();
+//!     let mut ast = fasteval::Ast::new();
+//!     let mut oast = fasteval::CExpr::new();
 //!
 //!     // The Unsafe Variable will use a pointer to read this memory location:
 //!     // You must make sure that this variable stays in-scope as long as the
@@ -296,22 +296,22 @@
 //! ```
 //!
 //! ## Let's Develop an Intuition of `fasteval` Internals
-//! In this advanced example, we peek into the AST to see how expressions are
+//! In this advanced example, we peek into the Ast to see how expressions are
 //! represented after the 'parse' and 'compile' phases.
 //! ```
 //! use fasteval::*;  // use this trait so we can call compile().
 //! fn main() -> Result<(), fasteval::Error> {
-//!     let mut ast = fasteval::AST::new();
-//!     let mut oast = fasteval::OAST::new();
+//!     let mut ast = fasteval::Ast::new();
+//!     let mut oast = fasteval::CExpr::new();
 //!
 //!     let expr_str = "sin(deg/360 * 2*pi())";
 //!     expr_str.parse_expr(&mut ast)?;
 //!
-//!     // Let's take a look at the parsed AST:
+//!     // Let's take a look at the parsed Ast:
 //!     // If you find this structure confusing, take a look at the compilation
-//!     // OAST below because it is simpler.
+//!     // CExpr below because it is simpler.
 //!     assert_eq!(format!("{:?}", ast),
-//!                r#"AST { exprs: { 0:Expr(EStdFunc(EVar("deg")), [ExprPair(EDiv, EConst(360.0)), ExprPair(EMul, EConst(2.0)), ExprPair(EMul, EStdFunc(EFuncPi))]), 1:Expr(EStdFunc(EFuncSin(0)), []) } }"#);
+//!                r#"Ast { exprs: { 0:Expr(EStdFunc(EVar("deg")), [ExprPair(EDiv, EConst(360.0)), ExprPair(EMul, EConst(2.0)), ExprPair(EMul, EStdFunc(EFuncPi))]), 1:Expr(EStdFunc(EFuncSin(0)), []) } }"#);
 //!                // Pretty-Print:
 //!                // ParseSlab{
 //!                //     exprs:{
@@ -327,7 +327,7 @@
 //!
 //!     ast.compile( &mut oast);
 //!
-//!     // Let's take a look at the compilation results and the AST inside the AST:
+//!     // Let's take a look at the compilation results and the Ast inside the Ast:
 //!     // Notice that compilation has performed constant-folding: 1/360 * 2*pi = 0.017453292519943295
 //!     // In the results below: IFuncSin(...) represents the sin function.
 //!     //                       InstructionI(1) represents the Instruction stored at index 1.
@@ -337,7 +337,7 @@
 //!     assert_eq!(format!("{:?}", oast.last().unwrap()),
 //!                "IFuncSin(1)");
 //!     assert_eq!(format!("{:?}", oast),
-//!                r#"OAST { 0:IVar("deg"), 1:IMul(0, IConst(0.017453292519943295)), 2:IFuncSin(1) }"#);
+//!                r#"CExpr { 0:IVar("deg"), 1:IMul(0, IConst(0.017453292519943295)), 2:IFuncSin(1) }"#);
 //!
 //!     Ok(())
 //! }
@@ -519,14 +519,14 @@ pub mod evaler;
 pub mod evalns;
 #[cfg(feature = "unsafe-vars")]
 pub use self::compiler::Instruction::IUnsafeVar;
-pub use self::compiler::{Instruction, OAST};
+pub use self::compiler::{CExpr, Instruction};
 pub use self::error::Error;
 pub use self::evalns::{
     Cached, CachedCallbackNamespace, EmptyNamespace, EvalNamespace, LayeredStringToF64Namespace,
     StrToCallbackNamespace, StrToF64Namespace, StringToCallbackNamespace, StringToF64Namespace,
 };
 
-pub use self::parser::{parse, ParseExpr, AST};
+pub use self::parser::{parse, Ast, ParseExpr};
 use std::fmt;
 
 fn write_indexed_list<T>(f: &mut fmt::Formatter, lst: &[T]) -> Result<(), fmt::Error>
@@ -555,7 +555,7 @@ where
 /// If you only need to evaluate an expression one time, then `eval()` will
 /// probably be perfectly adequate.  But if you plan to evaluate the same
 /// expression many times, or if you plan to evaluate many expressions, you
-/// are able to achieve better performance by allocating a single `AST` and
+/// are able to achieve better performance by allocating a single `Ast` and
 /// using it to perform multiple parse-compile-eval cycles yourself.
 ///
 /// # Errors
@@ -566,18 +566,18 @@ where
 ///
 /// [See the `fasteval` top-level documentation for examples.](../index.html#easy-evaluation)
 pub fn eval(expr_str: &str, ns: &mut impl EvalNamespace) -> Result<f64, Error> {
-    let mut ast = AST::new();
+    let mut ast = Ast::new();
     expr_str.parse_expr(&mut ast)?;
 
-    let mut oast = OAST::new();
+    let mut oast = CExpr::new();
     ast.compile(&mut oast);
     oast.eval(ns)
 }
 
 pub fn eval2(
     expr_str: &str,
-    ast: &mut AST,
-    oast: &mut OAST,
+    ast: &mut Ast,
+    oast: &mut CExpr,
     ns: &mut impl EvalNamespace,
 ) -> Result<f64, Error> {
     expr_str.parse_expr(ast)?;

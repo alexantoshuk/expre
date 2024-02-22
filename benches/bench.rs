@@ -3,8 +3,8 @@ use expre::*;
 use std::collections::BTreeMap;
 
 fn criterion_benchmark(c: &mut Criterion) {
-    let mut ast = expre::AST::new();
-    let mut oast = expre::OAST::new();
+    let mut ast = expre::Ast::new();
+    let mut cexpr = expre::CExpr::new();
     let mut map = BTreeMap::new();
     map.insert("x".to_string(), 10.0);
     map.insert("y".to_string(), 5.0);
@@ -15,12 +15,12 @@ fn criterion_benchmark(c: &mut Criterion) {
 
     c.bench_function("parse", |b| b.iter(|| expre::parse(expr_str, &mut ast)));
 
-    c.bench_function("compile", |b| b.iter(|| ast.compile(&mut oast)));
+    c.bench_function("compile", |b| b.iter(|| ast.compile(&mut cexpr)));
 
-    c.bench_function("eval", |b| b.iter(|| oast.eval(&mut map)));
+    c.bench_function("eval", |b| b.iter(|| cexpr.eval(&mut map)));
 
     c.bench_function("parse -> compile -> eval", |b| {
-        b.iter(|| expre::eval2(expr_str, &mut ast, &mut oast, &mut map))
+        b.iter(|| expre::eval2(expr_str, &mut ast, &mut cexpr, &mut map))
     });
 }
 
