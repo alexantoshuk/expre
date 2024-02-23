@@ -92,7 +92,7 @@ pub(crate) fn func_5f<F: Float>(name: &str) -> Option<fn(F, F, F, F, F) -> F> {
 }
 
 #[inline(always)]
-pub(crate) fn func_1s_nf<F: Float + Display + Debug>(name: &str) -> Option<fn(&str, Vec<F>) -> F> {
+pub(crate) fn func_1s_nf<F: Float + Display>(name: &str) -> Option<fn(&str, Vec<F>) -> F> {
     match name {
         "print" => Some(|s, v: Vec<F>| {
             eprintln!("{}", dyn_fmt::Arguments::new(s, &v));
@@ -104,13 +104,13 @@ pub(crate) fn func_1s_nf<F: Float + Display + Debug>(name: &str) -> Option<fn(&s
 
 #[inline(always)]
 pub fn round_to<F: Float>(x: F, n: F) -> F {
-    let n = F::powf(10.0f32.into(), n);
+    let n = F::powf(10_f32.into(), n);
     (x * n).round() / n
 }
 
 #[inline(always)]
 pub fn bias<F: Float>(x: F, b: F) -> F {
-    x.powf(b.ln() / F::ln(0.5f32.into()))
+    x.powf(b.ln() / F::ln(0.5_f32.into()))
 }
 
 ///Fits a value from oldminval-oldmaxval to the newminval-newmaxval range.
@@ -138,4 +138,16 @@ pub fn clamp<F: Float>(x: F, min: F, max: F) -> F {
 #[inline(always)]
 pub fn clamp01<F: Float>(x: F) -> F {
     x.min(F::one()).max(F::zero())
+}
+
+/// Uses [`EPSILON`](https://doc.rust-lang.org/core/f64/constant.EPSILON.html) to determine equality of two `f64`s.
+#[inline(always)]
+pub fn float_eq<F: Float>(l: F, r: F) -> bool {
+    (l - r).abs() <= F::epsilon() * 8_f32.into()
+}
+
+/// Uses [`EPSILON`](https://doc.rust-lang.org/core/f64/constant.EPSILON.html) to determine inequality of two `f64`s.
+#[inline(always)]
+pub fn float_ne<F: Float>(l: F, r: F) -> bool {
+    (l - r).abs() > F::epsilon() * 8_f32.into()
 }

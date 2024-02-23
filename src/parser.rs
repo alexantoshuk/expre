@@ -35,84 +35,6 @@ use std::str::{from_utf8, from_utf8_unchecked};
 pub const DEFAULT_EXPR_LEN_LIMIT: usize = 1024 * 10;
 pub const DEFAULT_EXPR_DEPTH_LIMIT: usize = 32;
 
-macro_rules! peek {
-    ($bs:ident) => {
-        $bs.first().copied()
-    };
-}
-macro_rules! peek_n {
-    ($bs:ident, $skip:literal) => {
-        $bs.get($skip).copied()
-    };
-    ($bs:ident, $skip:ident) => {
-        $bs.get($skip).copied()
-    };
-    ($bs:ident, $skip:expr) => {
-        $bs.get($skip).copied()
-    };
-}
-macro_rules! peek_is {
-    ($bs:ident, $skip:literal, $val:literal) => {
-        peek_n!($bs, $skip) == Some($val)
-    };
-    ($bs:ident, $skip:expr, $val:literal) => {
-        peek_n!($bs, $skip) == Some($val)
-    };
-}
-
-macro_rules! read {
-    ($bs:ident) => {
-        match $bs.first() {
-            Some(b) => {
-                *$bs = &$bs[1..];
-                Ok(*b)
-            }
-            None => Err(Error::EOF),
-        }
-    };
-    ($bs:ident, $parsing:literal) => {
-        match $bs.first() {
-            Some(b) => {
-                *$bs = &$bs[1..];
-                Ok(*b)
-            }
-            None => Err(Error::EofWhileParsing($parsing.to_string())),
-        }
-    };
-}
-
-macro_rules! skip {
-    ($bs:ident) => {
-        *$bs = &$bs[1..];
-    };
-}
-macro_rules! skip_n {
-    ($bs:ident, $n:literal) => {
-        *$bs = &$bs[$n..];
-    };
-    ($bs:ident, $n:ident) => {
-        *$bs = &$bs[$n..];
-    };
-}
-
-macro_rules! is_space {
-    ($b:ident) => {
-        if $b > b' ' {
-            false
-        } else {
-            $b == b' ' || $b == b'\n' || $b == b'\t' || $b == b'\r'
-        }
-    };
-}
-macro_rules! spaces {
-    ($bs:ident) => {
-        while let Some(b) = peek!($bs) {
-            if !is_space!(b) { break }
-            skip!($bs);  // We normally don't have long strings of whitespace, so it is more efficient to put this single-skip inside this loop rather than a skip_n afterwards.
-        }
-    };
-}
-
 #[derive(Copy, Clone, PartialEq, Eq)]
 pub struct I(pub usize);
 
@@ -145,6 +67,23 @@ impl From<I> for usize {
     }
 }
 
+/// Use this function to parse an expression String. The `Ast` will be cleared first.
+#[inline(always)]
+pub fn parse<S: AsRef<str>>(expr_str: S, ast: &mut Ast) -> Result<(), Error> {
+    ast.parse(expr_str)
+}
+
+pub trait ParseExpr {
+    fn parse_expr(&self, ast: &mut Ast) -> Result<(), Error>;
+}
+
+impl<S: AsRef<str>> ParseExpr for S {
+    #[inline(always)]
+    fn parse_expr(&self, ast: &mut Ast) -> Result<(), Error> {
+        ast.parse(self)
+    }
+}
+
 pub struct Ast {
     pub(crate) exprs: Vec<Expr>,
     #[cfg(feature = "unsafe-vars")]
@@ -166,6 +105,24 @@ impl Ast {
             #[cfg(feature = "unsafe-vars")]
             unsafe_vars: BTreeMap::new(),
         }
+    }
+
+    #[inline]
+    pub fn parsed<S: AsRef<str>>(expr_str: S) -> Result<Ast, Error> {
+        let mut ast = Self::new();
+        ast.parse(expr_str).map(|_| ast)
+    }
+
+    /// Use this function to parse an expression String. The `Ast` will be cleared first.
+    #[inline]
+    pub fn parse<S: AsRef<str>>(&mut self, expr_str: S) -> Result<(), Error> {
+        let expr_str = expr_str.as_ref();
+        self.clear();
+        if expr_str.len() > DEFAULT_EXPR_LEN_LIMIT {
+            return Err(Error::TooLong);
+        } // Restrict length for safety
+        let mut bs = expr_str.as_bytes();
+        self.read_expr(&mut bs, 0, true).map(|_| ())
     }
 
     /// Clears all data from [`Ast`](struct.ParseAST.html) and [`Ast`](struct.CompileAST.html).
@@ -226,8 +183,196 @@ impl Ast {
     /// [See the `add_unsafe_var()` documentation above.](#unsafe-variable-registration-with-add_unsafe_var)
     #[cfg(feature = "unsafe-vars")]
     #[allow(clippy::trivially_copy_pass_by_ref)]
+    #[inline(always)]
     pub unsafe fn add_unsafe_var(&mut self, name: String, ptr: &f64) {
         self.unsafe_vars.insert(name, ptr as *const f64);
+    }
+    #[inline(always)]
+    fn read_expr(&mut self, bs: &mut &[u8], depth: usize, expect_eof: bool) -> Result<I, Error> {
+        if depth > DEFAULT_EXPR_DEPTH_LIMIT {
+            return Err(Error::TooDeep);
+        }
+
+        let first = self.read_value(bs, depth)?;
+
+        let mut pairs = Vec::<ExprPair>::with_capacity(8);
+        loop {
+            match read_binaryop(bs)? {
+                None => break,
+                Some(bop) => {
+                    let val = self.read_value(bs, depth)?;
+                    pairs.push((bop, val));
+                }
+            }
+        }
+        spaces(bs);
+        if expect_eof && !bs.is_empty() {
+            let bs_str = match from_utf8(bs) {
+                Ok(s) => s,
+                Err(..) => "Utf8Error while handling UnparsedTokensRemaining error",
+            };
+            return Err(Error::UnparsedTokensRemaining(bs_str.to_string()));
+        }
+        Ok(self.push_expr(Expr(first, pairs))?)
+    }
+
+    #[inline(always)]
+    fn read_value(&mut self, bs: &mut &[u8], depth: usize) -> Result<Value, Error> {
+        if depth > DEFAULT_EXPR_DEPTH_LIMIT {
+            return Err(Error::TooDeep);
+        }
+        if let Some(c) = read_const(bs)? {
+            return Ok(EConst(c));
+        }
+        if let Some(u) = self.read_unaryop(bs, depth)? {
+            return Ok(EUnaryOp(u));
+        }
+        if let Some(c) = self.read_callable(bs, depth)? {
+            return Ok(c);
+        }
+        // Improve the precision of this error case:
+        if bs.is_empty() {
+            return Err(Error::EofWhileParsing("value".to_string()));
+        }
+
+        Err(Error::InvalidValue)
+    }
+
+    #[inline(always)]
+    fn read_unaryop(&mut self, bs: &mut &[u8], depth: usize) -> Result<Option<UnaryOp>, Error> {
+        spaces(bs);
+        match peek(bs) {
+            None => Ok(None), // Err(KErr::new("EOF at UnaryOp position")), -- Instead of erroring, let the higher level decide what to do.
+            Some(b) => match b {
+                b'+' => {
+                    skip(bs);
+                    let v = self.read_value(bs, depth + 1)?;
+                    Ok(Some(EPos(self.push_val(v)?)))
+                }
+                b'-' => {
+                    skip(bs);
+                    let v = self.read_value(bs, depth + 1)?;
+                    Ok(Some(ENeg(self.push_val(v)?)))
+                }
+                b'(' => {
+                    skip(bs);
+                    let xi = self.read_expr(bs, depth + 1, false)?;
+                    spaces(bs);
+                    if read(bs).ok_or(Error::EofWhileParsing("parentheses".into()))? != b')' {
+                        return Err(Error::Expected(")".to_string()));
+                    }
+                    Ok(Some(EParen(xi)))
+                }
+                b'[' => {
+                    skip(bs);
+                    let xi = self.read_expr(bs, depth + 1, false)?;
+                    spaces(bs);
+                    if read(bs).ok_or(Error::EofWhileParsing("square brackets".into()))? != b']' {
+                        return Err(Error::Expected("]".to_string()));
+                    }
+                    Ok(Some(EParen(xi)))
+                }
+                b'!' => {
+                    skip(bs);
+                    let v = self.read_value(bs, depth + 1)?;
+                    Ok(Some(ENot(self.push_val(v)?)))
+                }
+                _ => Ok(None),
+            },
+        }
+    }
+
+    #[inline(always)]
+    fn read_callable(&mut self, bs: &mut &[u8], depth: usize) -> Result<Option<Value>, Error> {
+        match read_varname(bs)? {
+            None => Ok(None),
+            Some(varname) => {
+                match read_open_parenthesis(bs)? {
+                    None => {
+                        // VarNames without Parenthesis are always treated as custom 0-arg functions.
+
+                        #[cfg(feature = "unsafe-vars")]
+                        match ast.unsafe_vars.get(&varname) {
+                            None => Ok(Some(EVar(varname))),
+                            Some(&ptr) => Ok(Some(EUnsafeVar { name: varname, ptr })),
+                        }
+
+                        #[cfg(not(feature = "unsafe-vars"))]
+                        Ok(Some(EVar(varname)))
+                    }
+                    Some(open_parenth) => {
+                        // VarNames with Parenthesis are first matched against builtins, then custom.
+                        Ok(Some(self.read_func(varname, bs, depth, open_parenth)?))
+                    }
+                }
+            }
+        }
+    }
+
+    #[inline(always)]
+    fn read_func(
+        &mut self,
+        fname: String,
+        bs: &mut &[u8],
+        depth: usize,
+        open_parenth: u8,
+    ) -> Result<Value, Error> {
+        let close_parenth = match open_parenth {
+            b'(' => b')',
+            b'[' => b']',
+            _ => return Err(Error::Expected("'(' or '['".to_string())),
+        };
+        let mut sargs = Vec::<String>::with_capacity(2);
+        let mut args = Vec::<I>::with_capacity(4);
+
+        loop {
+            spaces(bs);
+            match peek(bs) {
+                Some(b) => {
+                    if b == close_parenth {
+                        skip(bs);
+                        break;
+                    }
+                }
+                None => return Err(Error::EofWhileParsing(fname)),
+            }
+            if !args.is_empty() {
+                match read(bs) {
+                    Some(b',') => {}
+                    _ => return Err(Error::Expected("','".to_string())),
+                }
+            } else {
+                if let Some(s) = read_string(bs)? {
+                    sargs.push(s);
+                    println!("{:?}", sargs);
+                    match read(bs) {
+                        Some(b',') => {}
+                        _ => {
+                            return Err(Error::Expected("','".to_string()));
+                        }
+                    }
+                    continue;
+                }
+            }
+            args.push(self.read_expr(bs, depth + 1, false)?);
+        }
+
+        #[cfg(feature = "unsafe-vars")]
+        match ast.unsafe_vars.get(&fname) {
+            None => Ok(EFunc {
+                name: fname,
+                sargs,
+                args,
+            }),
+            Some(&ptr) => Ok(EUnsafeVar { name: fname, ptr }),
+        }
+
+        #[cfg(not(feature = "unsafe-vars"))]
+        Ok(EFunc {
+            name: fname,
+            sargs,
+            args,
+        })
     }
 }
 
@@ -237,17 +382,6 @@ impl Debug for Ast {
         write_indexed_list(f, &self.exprs)?;
         write!(f, "]")?;
         Ok(())
-    }
-}
-
-pub trait ParseExpr {
-    fn parse_expr(&self, ast: &mut Ast) -> Result<(), Error>;
-}
-
-impl<S: AsRef<str>> ParseExpr for S {
-    #[inline(always)]
-    fn parse_expr(&self, ast: &mut Ast) -> Result<(), Error> {
-        super::parse(self, ast)
     }
 }
 
@@ -324,77 +458,67 @@ pub enum BinaryOp {
 }
 use BinaryOp::*;
 
-/// Use this function to parse an expression String. The `Ast` will be cleared first.
-#[inline]
-pub fn parse<S: AsRef<str>>(expr_str: S, ast: &mut Ast) -> Result<(), Error> {
-    let expr_str = expr_str.as_ref();
-    ast.clear();
-    if expr_str.len() > DEFAULT_EXPR_LEN_LIMIT {
-        return Err(Error::TooLong);
-    } // Restrict length for safety
-    let mut bs = expr_str.as_bytes();
-    read_expr(ast, &mut bs, 0, true).map(|_| ())
+#[inline(always)]
+fn peek(bs: &[u8]) -> Option<u8> {
+    bs.first().copied()
 }
 
-fn read_expr(ast: &mut Ast, bs: &mut &[u8], depth: usize, expect_eof: bool) -> Result<I, Error> {
-    if depth > DEFAULT_EXPR_DEPTH_LIMIT {
-        return Err(Error::TooDeep);
+#[inline(always)]
+fn peek_n(bs: &[u8], n: usize) -> Option<u8> {
+    bs.get(n).copied()
+}
+
+#[inline(always)]
+fn peek_is(bs: &[u8], n: usize, b: u8) -> bool {
+    bs.get(n).copied() == Some(b)
+}
+
+#[inline(always)]
+fn skip(bs: &mut &[u8]) {
+    *bs = &bs[1..];
+}
+
+#[inline(always)]
+fn skip_n(bs: &mut &[u8], n: usize) {
+    *bs = &bs[n..];
+}
+
+#[inline(always)]
+fn is_space(b: u8) -> bool {
+    if b > b' ' {
+        false
+    } else {
+        b == b' ' || b == b'\n' || b == b'\t' || b == b'\r'
     }
+}
 
-    let first = read_value(ast, bs, depth)?;
-
-    let mut pairs = Vec::<ExprPair>::with_capacity(8);
-    loop {
-        match read_binaryop(bs)? {
-            None => break,
-            Some(bop) => {
-                let val = read_value(ast, bs, depth)?;
-                pairs.push((bop, val));
-            }
+#[inline(always)]
+fn spaces(bs: &mut &[u8]) {
+    while let Some(b) = peek(bs) {
+        if !is_space(b) {
+            break;
         }
+        skip(bs); // We normally don't have long strings of whitespace, so it is more efficient to put this single-skip inside this loop rather than a skip_n afterwards.
     }
-    spaces!(bs);
-    if expect_eof && !bs.is_empty() {
-        let bs_str = match from_utf8(bs) {
-            Ok(s) => s,
-            Err(..) => "Utf8Error while handling UnparsedTokensRemaining error",
-        };
-        return Err(Error::UnparsedTokensRemaining(bs_str.to_string()));
-    }
-    Ok(ast.push_expr(Expr(first, pairs))?)
 }
 
-#[inline]
-fn read_value(ast: &mut Ast, bs: &mut &[u8], depth: usize) -> Result<Value, Error> {
-    if depth > DEFAULT_EXPR_DEPTH_LIMIT {
-        return Err(Error::TooDeep);
-    }
-    if let Some(c) = read_const(ast, bs)? {
-        return Ok(EConst(c));
-    }
-    if let Some(u) = read_unaryop(ast, bs, depth)? {
-        return Ok(EUnaryOp(u));
-    }
-    if let Some(c) = read_callable(ast, bs, depth)? {
-        return Ok(c);
-    }
-    // Improve the precision of this error case:
-    if bs.is_empty() {
-        return Err(Error::EofWhileParsing("value".to_string()));
-    }
-
-    Err(Error::InvalidValue)
+#[inline(always)]
+fn read(bs: &mut &[u8]) -> Option<u8> {
+    bs.first().map(|b| {
+        *bs = &bs[1..];
+        *b
+    })
 }
 
-#[inline]
-fn read_const(ast: &mut Ast, bs: &mut &[u8]) -> Result<Option<f64>, Error> {
-    spaces!(bs);
+#[inline(always)]
+fn read_const(bs: &mut &[u8]) -> Result<Option<f64>, Error> {
+    spaces(bs);
 
     let mut toklen = 0;
     let mut sign_ok = true;
     let mut saw_val = false;
     loop {
-        match peek_n!(bs, toklen) {
+        match peek_n(bs, toklen) {
             None => break,
             Some(b) => {
                 if b'0' <= b && b <= b'9' || b == b'.' {
@@ -422,143 +546,9 @@ fn read_const(ast: &mut Ast, bs: &mut &[u8]) -> Result<Option<f64>, Error> {
     let val = tok
         .parse::<f64>()
         .map_err(|_| Error::ParseF64(tok.to_string()))?;
-    skip_n!(bs, toklen);
+    skip_n(bs, toklen);
 
     Ok(Some(val))
-}
-
-fn read_unaryop(ast: &mut Ast, bs: &mut &[u8], depth: usize) -> Result<Option<UnaryOp>, Error> {
-    spaces!(bs);
-    match peek!(bs) {
-        None => Ok(None), // Err(KErr::new("EOF at UnaryOp position")), -- Instead of erroring, let the higher level decide what to do.
-        Some(b) => match b {
-            b'+' => {
-                skip!(bs);
-                let v = read_value(ast, bs, depth + 1)?;
-                Ok(Some(EPos(ast.push_val(v)?)))
-            }
-            b'-' => {
-                skip!(bs);
-                let v = read_value(ast, bs, depth + 1)?;
-                Ok(Some(ENeg(ast.push_val(v)?)))
-            }
-            b'(' => {
-                skip!(bs);
-                let xi = read_expr(ast, bs, depth + 1, false)?;
-                spaces!(bs);
-                if read!(bs, "parentheses")? != b')' {
-                    return Err(Error::Expected(")".to_string()));
-                }
-                Ok(Some(EParen(xi)))
-            }
-            b'[' => {
-                skip!(bs);
-                let xi = read_expr(ast, bs, depth + 1, false)?;
-                spaces!(bs);
-                if read!(bs, "square brackets")? != b']' {
-                    return Err(Error::Expected("]".to_string()));
-                }
-                Ok(Some(EParen(xi)))
-            }
-            b'!' => {
-                skip!(bs);
-                let v = read_value(ast, bs, depth + 1)?;
-                Ok(Some(ENot(ast.push_val(v)?)))
-            }
-            _ => Ok(None),
-        },
-    }
-}
-
-fn read_callable(ast: &mut Ast, bs: &mut &[u8], depth: usize) -> Result<Option<Value>, Error> {
-    match read_varname(bs)? {
-        None => Ok(None),
-        Some(varname) => {
-            match read_open_parenthesis(bs)? {
-                None => {
-                    // VarNames without Parenthesis are always treated as custom 0-arg functions.
-
-                    #[cfg(feature = "unsafe-vars")]
-                    match ast.unsafe_vars.get(&varname) {
-                        None => Ok(Some(EVar(varname))),
-                        Some(&ptr) => Ok(Some(EUnsafeVar { name: varname, ptr })),
-                    }
-
-                    #[cfg(not(feature = "unsafe-vars"))]
-                    Ok(Some(EVar(varname)))
-                }
-                Some(open_parenth) => {
-                    // VarNames with Parenthesis are first matched against builtins, then custom.
-                    Ok(Some(read_func(varname, ast, bs, depth, open_parenth)?))
-                }
-            }
-        }
-    }
-}
-
-fn read_func(
-    fname: String,
-    ast: &mut Ast,
-    bs: &mut &[u8],
-    depth: usize,
-    open_parenth: u8,
-) -> Result<Value, Error> {
-    let close_parenth = match open_parenth {
-        b'(' => b')',
-        b'[' => b']',
-        _ => return Err(Error::Expected("'(' or '['".to_string())),
-    };
-    let mut sargs = Vec::<String>::with_capacity(2);
-    let mut args = Vec::<I>::with_capacity(4);
-
-    loop {
-        spaces!(bs);
-        match peek!(bs) {
-            Some(b) => {
-                if b == close_parenth {
-                    skip!(bs);
-                    break;
-                }
-            }
-            None => return Err(Error::EofWhileParsing(fname)),
-        }
-        if !args.is_empty() {
-            match read!(bs) {
-                Ok(b',') => {}
-                _ => return Err(Error::Expected("','".to_string())),
-            }
-        } else {
-            if let Some(s) = read_string(bs)? {
-                sargs.push(s);
-                println!("{:?}", sargs);
-                match read!(bs) {
-                    Ok(b',') => {}
-                    _ => {
-                        return Err(Error::Expected("','".to_string()));
-                    }
-                }
-                continue;
-            }
-        }
-        args.push(read_expr(ast, bs, depth + 1, false)?);
-    }
-
-    #[cfg(feature = "unsafe-vars")]
-    match ast.unsafe_vars.get(&fname) {
-        None => Ok(EFunc {
-            name: fname,
-            sargs,
-            args,
-        }),
-        Some(&ptr) => Ok(EUnsafeVar { name: fname, ptr }),
-    }
-
-    #[cfg(not(feature = "unsafe-vars"))]
-    Ok(EFunc {
-        name: fname,
-        sargs,
-        args,
-    })
 }
 
 #[inline(always)]
@@ -568,6 +558,7 @@ fn is_varname_byte(b: u8, i: usize) -> bool {
         || b == b'_'
         || (i > 0 && (b'0' <= b && b <= b'9'))
 }
+
 #[inline(always)]
 fn is_varname_byte_opt(bo: Option<u8>, i: usize) -> bool {
     match bo {
@@ -576,68 +567,69 @@ fn is_varname_byte_opt(bo: Option<u8>, i: usize) -> bool {
     }
 }
 
+#[inline(always)]
 fn read_binaryop(bs: &mut &[u8]) -> Result<Option<BinaryOp>, Error> {
-    spaces!(bs);
-    match peek!(bs) {
+    spaces(bs);
+    match peek(bs) {
         None => Ok(None), // Err(KErr::new("EOF")), -- EOF is usually OK in a BinaryOp position.
         Some(b) => match b {
             b'+' => {
-                skip!(bs);
+                skip(bs);
                 Ok(Some(EAdd))
             }
             b'-' => {
-                skip!(bs);
+                skip(bs);
                 Ok(Some(ESub))
             }
             b'*' => {
-                skip!(bs);
+                skip(bs);
                 Ok(Some(EMul))
             }
             b'/' => {
-                skip!(bs);
+                skip(bs);
                 Ok(Some(EDiv))
             }
             b'%' => {
-                skip!(bs);
+                skip(bs);
                 Ok(Some(EMod))
             }
             b'^' => {
-                skip!(bs);
+                skip(bs);
                 Ok(Some(EExp))
             }
             b'<' => {
-                skip!(bs);
-                if peek_is!(bs, 0, b'=') {
-                    skip!(bs);
+                skip(bs);
+                if peek_is(bs, 0, b'=') {
+                    skip(bs);
                     Ok(Some(ELTE))
                 } else {
                     Ok(Some(ELT))
                 }
             }
             b'>' => {
-                skip!(bs);
-                if peek_is!(bs, 0, b'=') {
-                    skip!(bs);
+                skip(bs);
+                if peek_is(bs, 0, b'=') {
+                    skip(bs);
                     Ok(Some(EGTE))
                 } else {
                     Ok(Some(EGT))
                 }
             }
-            b'=' if peek_is!(bs, 1, b'=') => {
-                skip_n!(bs, 2);
+            b'=' if peek_is(bs, 1, b'=') => {
+                skip_n(bs, 2);
                 Ok(Some(EEQ))
             }
-            b'!' if peek_is!(bs, 1, b'=') => {
-                skip_n!(bs, 2);
+            b'!' if peek_is(bs, 1, b'=') => {
+                skip_n(bs, 2);
                 Ok(Some(ENE))
             }
-            b'|' if peek_is!(bs, 1, b'|') => {
-                skip_n!(bs, 2);
+            b'|' if peek_is(bs, 1, b'|') => {
+                skip_n(bs, 2);
                 Ok(Some(EOR))
             }
 
-            b'&' if peek_is!(bs, 1, b'&') => {
-                skip_n!(bs, 2);
+            b'&' if peek_is(bs, 1, b'&') => {
+                skip_n(bs, 2);
                 Ok(Some(EAND))
             }
             _ => Ok(None),
@@ -645,11 +637,12 @@ fn read_binaryop(bs: &mut &[u8]) -> Result<Option<BinaryOp>, Error> {
     }
 }
 
+#[inline(always)]
 fn read_varname(bs: &mut &[u8]) -> Result<Option<String>, Error> {
-    spaces!(bs);
+    spaces(bs);
 
     let mut toklen = 0;
-    while is_varname_byte_opt(peek_n!(bs, toklen), toklen) {
+    while is_varname_byte_opt(peek_n(bs, toklen), toklen) {
         toklen = toklen + 1;
     }
 
@@ -658,26 +651,25 @@ fn read_varname(bs: &mut &[u8]) -> Result<Option<String>, Error> {
     }
 
     let out = unsafe { from_utf8_unchecked(&bs[..toklen]) }.to_string();
-    skip_n!(bs, toklen);
+    skip_n(bs, toklen);
     Ok(Some(out))
 }
 
+#[inline(always)]
 fn read_open_parenthesis(bs: &mut &[u8]) -> Result<Option<u8>, Error> {
-    spaces!(bs);
+    spaces(bs);
 
-    match peek!(bs) {
-        Some(b'(') | Some(b'[') => Ok(Some(match read!(bs) {
-            Ok(b) => b,
-            Err(..) => return Err(Error::Unreachable),
-        })),
+    match peek(bs) {
+        Some(b'(') | Some(b'[') => Ok(Some(read(bs).ok_or(Error::Unreachable)?)),
         _ => Ok(None),
     }
 }
 
+#[inline(always)]
 fn read_string(bs: &mut &[u8]) -> Result<Option<String>, Error> {
-    spaces!(bs);
+    spaces(bs);
 
-    match peek!(bs) {
+    match peek(bs) {
         None => {
             return Err(Error::EofWhileParsing(
                 "opening quote of string".to_string(),
@@ -685,14 +677,14 @@ fn read_string(bs: &mut &[u8]) -> Result<Option<String>, Error> {
         }
 
         Some(b'"') => {
-            skip!(bs);
+            skip(bs);
         }
         Some(_) => return Ok(None),
     }
 
     let mut prev = b' ';
     let mut toklen = 0;
-    while match peek_n!(bs, toklen) {
+    while match peek_n(bs, toklen) {
         None => false,
         Some(b'"') => prev == b'\\',
         Some(p) => {
@@ -705,12 +697,11 @@ fn read_string(bs: &mut &[u8]) -> Result<Option<String>, Error> {
 
     let out =
         from_utf8(&bs[..toklen]).map_err(|_| Error::Utf8ErrorWhileParsing("string".to_string()))?;
-    skip_n!(bs, toklen);
-    match read!(bs) {
-        Err(Error::EOF) => Err(Error::EofWhileParsing("string".to_string())),
-        Err(_) => Err(Error::Unreachable),
-        Ok(b'"') => Ok(Some(out.to_string())),
-        Ok(_) => Err(Error::Unreachable),
+    skip_n(bs, toklen);
+    match read(bs) {
+        None => Err(Error::EofWhileParsing("string".to_string())),
+        Some(b'"') => Ok(Some(out.to_string())),
+        Some(_) => Err(Error::Unreachable),
     }
 }
 
@@ -725,16 +716,16 @@ mod test {
             let bsarr = [1, 2, 3];
             let bs = &mut &bsarr[..];
 
-            assert_eq!(peek!(bs), Some(1));
-            assert_eq!(peek_n!(bs, 1), Some(2));
-            assert_eq!(peek_n!(bs, 2), Some(3));
-            assert_eq!(peek_n!(bs, 3), None);
+            assert_eq!(peek(bs), Some(1));
+            assert_eq!(peek_n(bs, 1), Some(2));
+            assert_eq!(peek_n(bs, 2), Some(3));
+            assert_eq!(peek_n(bs, 3), None);
 
-            assert_eq!(read!(bs)?, 1);
-            skip!(bs);
-            assert_eq!(read!(bs)?, 3);
-            match read!(bs).err() {
-                Some(Error::EOF) => {}
+            assert_eq!(read(bs).unwrap(), 1);
+            skip(bs);
+            assert_eq!(read(bs).unwrap(), 3);
+            match read(bs) {
+                None => {}
                 _ => panic!("I expected an EOF"),
             }
 
@@ -752,24 +743,24 @@ mod test {
         assert!(!(b"x").is_empty());
 
         let b = b' ';
-        assert!(is_space!(b));
+        assert!(is_space(b));
         let b = b'\t';
-        assert!(is_space!(b));
+        assert!(is_space(b));
         let b = b'\r';
-        assert!(is_space!(b));
+        assert!(is_space(b));
         let b = b'\n';
-        assert!(is_space!(b));
+        assert!(is_space(b));
         let b = b'a';
-        assert!(!is_space!(b));
+        assert!(!is_space(b));
         let b = b'1';
-        assert!(!is_space!(b));
+        assert!(!is_space(b));
         let b = b'.';
-        assert!(!is_space!(b));
+        assert!(!is_space(b));
 
         {
             let bsarr = b"  abc 123   ";
             let bs = &mut &bsarr[..];
-            spaces!(bs);
+            spaces(bs);
             assert_eq!(bs, b"abc 123   ");
         }
     }
@@ -783,7 +774,7 @@ mod test {
         {
             let bsarr = b"12.34";
             let bs = &mut &bsarr[..];
-            assert_eq!(read_value(&mut ast, bs, 0), Ok(EConst(12.34)));
+            assert_eq!(ast.read_value(bs, 0), Ok(EConst(12.34)));
         }
     }
 }

@@ -6,7 +6,7 @@
 //! * Works with stable Rust.
 //! * Supports interpretation (i.e. parse & eval) as well as compiled execution (i.e. parse, compile, eval).
 //! * Supports Variables and Custom Functions.
-//! * `fasteval` is a good base for building higher-level languages.
+//! * `expre` is a good base for building higher-level languages.
 //! * Supports many built-in functions and constants.
 //! * Supports all the standard algebraic unary and binary operators (+ - * / ^ %),
 //!   as well as comparisons (< <= == != >= >) and logical operators (&& ||) with
@@ -14,11 +14,11 @@
 //! * Easy integration into many different types of applications, including scoped evaluation.
 //! * Very fast performance.
 //!
-//! # The `fasteval` Expression "Mini-Language"
+//! # The `expre` Expression "Mini-Language"
 //!
 //! ## Built-in Functions and Constants
 //!
-//! These are the built-in functions that `fasteval` expressions support.  (You
+//! These are the built-in functions that `expre` expressions support.  (You
 //! can also add your own custom functions and variables -- see the
 //! [Examples](#advanced-variables-and-custom-functions) section.)
 //!
@@ -108,11 +108,11 @@
 //! ```
 //! // In case you didn't know, Rust allows `main()` to return a `Result`.
 //! // This lets us use the `?` operator inside of `main()`.  Very convenient!
-//! fn main() -> Result<(), fasteval::Error> {
+//! fn main() -> Result<(), expre::Error> {
 //!     // This example doesn't use any variables, so just use an EmptyNamespace:
-//!     let mut ns = fasteval::EmptyNamespace;
+//!     let mut ns = expre::EmptyNamespace;
 //!
-//!     let val = fasteval::eval(
+//!     let val = expre::eval(
 //!         "1+2*3/4^5%6 + log(100K) + log(e(),100) + [3*(3-3)/3] + (2<3) && 1.23",    &mut ns)?;
 //!     //    |            |      |    |   |          |               |   |
 //!     //    |            |      |    |   |          |               |   boolean logic with short-circuit support
@@ -138,13 +138,13 @@
 //!
 //! ```
 //! use std::collections::BTreeMap;
-//! fn main() -> Result<(), fasteval::Error> {
+//! fn main() -> Result<(), expre::Error> {
 //!     let mut map : BTreeMap<String,f64> = BTreeMap::new();
 //!     map.insert("x".to_string(), 1.0);
 //!     map.insert("y".to_string(), 2.0);
 //!     map.insert("z".to_string(), 3.0);
 //!
-//!     let val = fasteval::eval(r#"x + print("y:",y) + z"#,    &mut map)?;
+//!     let val = expre::eval(r#"x + print("y:",y) + z"#,    &mut map)?;
 //!     //                                 |
 //!     //                                 prints "y: 2" to stderr and then evaluates to 2.0
 //!
@@ -159,7 +159,7 @@
 //! which defines custom variables, functions, and array-like objects:
 //!
 //! ```
-//! fn main() -> Result<(), fasteval::Error> {
+//! fn main() -> Result<(), expre::Error> {
 //!     let mut cb = |name:&str, args:Vec<f64>| -> Option<f64> {
 //!         let mydata : [f64; 3] = [11.1, 22.2, 33.3];
 //!         match name {
@@ -181,7 +181,7 @@
 //!         }
 //!     };
 //!
-//!     let val = fasteval::eval("sum(x^2, y^2)^0.5 + data[0]",    &mut cb)?;
+//!     let val = expre::eval("sum(x^2, y^2)^0.5 + data[0]",    &mut cb)?;
 //!     //                           |   |                   |
 //!     //                           |   |                   square-brackets act like parenthesis
 //!     //                           |   variables are like custom functions with zero args
@@ -235,10 +235,10 @@
 //! usually more than 200 times faster.
 //! ```
 //! use std::collections::BTreeMap;
-//! use fasteval::*;    // use this trait so we can call eval().
-//! fn main() -> Result<(), fasteval::Error> {
-//!     let mut ast = fasteval::Ast::new();
-//!     let mut oast = fasteval::CExpr::new();
+//! use expre::*;    // use this trait so we can call eval().
+//! fn main() -> Result<(), expre::Error> {
+//!     let mut ast = expre::Ast::new();
+//!     let mut oast = expre::CExpr::new();
 //!     let mut map = BTreeMap::new();
 //!
 //!     let expr_str = "sin(deg/360 * 2*pi())";
@@ -264,10 +264,10 @@
 //! feature is not enabled by default because it slightly slows down other
 //! non-variable operations.
 //! ```
-//! use fasteval::*;
-//! fn main() -> Result<(), fasteval::Error> {
-//!     let mut ast = fasteval::Ast::new();
-//!     let mut oast = fasteval::CExpr::new();
+//! use expre::*;
+//! fn main() -> Result<(), expre::Error> {
+//!     let mut ast = expre::Ast::new();
+//!     let mut oast = expre::CExpr::new();
 //!
 //!     // The Unsafe Variable will use a pointer to read this memory location:
 //!     // You must make sure that this variable stays in-scope as long as the
@@ -282,7 +282,7 @@
 //!     expr_str.parse_expr(&mut ast)?;
 //!     ast.compile(&mut oast);
 //!
-//!     let mut ns = fasteval::EmptyNamespace;  // We only define unsafe variables, not normal variables,
+//!     let mut ns = expre::EmptyNamespace;  // We only define unsafe variables, not normal variables,
 //!                                             // so EmptyNamespace is fine.
 //!
 //!     for d in 0..360 {
@@ -295,14 +295,14 @@
 //! }
 //! ```
 //!
-//! ## Let's Develop an Intuition of `fasteval` Internals
+//! ## Let's Develop an Intuition of `expre` Internals
 //! In this advanced example, we peek into the Ast to see how expressions are
 //! represented after the 'parse' and 'compile' phases.
 //! ```
-//! use fasteval::*;  // use this trait so we can call compile().
-//! fn main() -> Result<(), fasteval::Error> {
-//!     let mut ast = fasteval::Ast::new();
-//!     let mut oast = fasteval::CExpr::new();
+//! use expre::*;  // use this trait so we can call compile().
+//! fn main() -> Result<(), expre::Error> {
+//!     let mut ast = expre::Ast::new();
+//!     let mut oast = expre::CExpr::new();
 //!
 //!     let expr_str = "sin(deg/360 * 2*pi())";
 //!     expr_str.parse_expr(&mut ast)?;
@@ -345,7 +345,7 @@
 //!
 //! # Safety
 //!
-//! `fasteval` is designed to evaluate untrusted expressions safely.  By
+//! `expre` is designed to evaluate untrusted expressions safely.  By
 //! default, an expression can only perform math operations; there is no way
 //! for it to access other types of operations (like network or filesystem or
 //! external commands).  Additionally, we guard against malicious expressions:
@@ -356,8 +356,8 @@
 //! * Expressions with too many sub-expressions (greater than 64).
 //!
 //! All limits can be customized at parse time.  If any limits are exceeded,
-//! [`parse()`](https://docs.rs/fasteval/latest/fasteval/parser/struct.Parser.html#method.parse) will return an
-//! [Error](https://docs.rs/fasteval/latest/fasteval/error/enum.Error.html).
+//! [`parse()`](https://docs.rs/expre/latest/expre/parser/struct.Parser.html#method.parse) will return an
+//! [Error](https://docs.rs/expre/latest/expre/error/enum.Error.html).
 //!
 //! Note that it *is* possible for you (the developer) to define custom functions
 //! which might perform dangerous operations.  It is your responsibility to make
@@ -370,7 +370,7 @@
 //!
 //! Here are links to all the libraries/tools included in these benchmarks:
 //!
-//! * [fasteval (this library)](https://github.com/likebike/fasteval)
+//! * [expre (this library)](https://github.com/likebike/expre)
 //! * [caldyn](https://github.com/Luthaf/caldyn)
 //! * [rsc](https://github.com/codemessiah/rsc)
 //! * [meval](https://github.com/rekka/meval-rs)
@@ -386,29 +386,29 @@
 //! differences.
 //!
 //! **Performance of evaluation of a compiled expression:**  
-//! ![Compiled Eval Performance](https://raw.githubusercontent.com/likebike/fasteval/master/benches/results/20191225/fasteval-compiled.png)
+//! ![Compiled Eval Performance](https://raw.githubusercontent.com/likebike/expre/master/benches/results/20191225/expre-compiled.png)
 //!
 //! **Performance of one-time interpretation (parse and eval):**  
-//! ![Interpretation Performance](https://raw.githubusercontent.com/likebike/fasteval/master/benches/results/20191225/fasteval-interp.png)
+//! ![Interpretation Performance](https://raw.githubusercontent.com/likebike/expre/master/benches/results/20191225/expre-interp.png)
 //!
 //! **Performance of compiled Unsafe Variables, compared to the tinyexpr C library (the
 //! only other library in our test set that supports this mode):**  
-//! ![Unsafe Compiled Eval Performance](https://raw.githubusercontent.com/likebike/fasteval/master/benches/results/20191225/fasteval-compiled-unsafe.png)
+//! ![Unsafe Compiled Eval Performance](https://raw.githubusercontent.com/likebike/expre/master/benches/results/20191225/expre-compiled-unsafe.png)
 //!
 //! **Performance of interpreted Unsafe Variables, compared to the tinyexpr C library (the
 //! only other library in our test set that supports this mode):**  
-//! ![Unsafe Interpretation Performance](https://raw.githubusercontent.com/likebike/fasteval/master/benches/results/20191225/fasteval-interp-unsafe.png)
+//! ![Unsafe Interpretation Performance](https://raw.githubusercontent.com/likebike/expre/master/benches/results/20191225/expre-interp-unsafe.png)
 //!
 //! ## Summary
 //!
-//! The impressive thing about these results is that `fasteval` consistently
+//! The impressive thing about these results is that `expre` consistently
 //! achieves the fastest times across every benchmark and in every mode of
 //! operation (interpreted, compiled, and unsafe).  It's easy to create a
 //! design to claim the #1 spot in any one of these metrics by sacrificing
 //! performance in another, but it is difficult to create a design that can be
 //! #1 across-the-board.
 //!
-//! Because of the broad and robust performance advantages, `fasteval` is very
+//! Because of the broad and robust performance advantages, `expre` is very
 //! likely to be an excellent choice for your dynamic evaluation needs.
 //!
 //! ## Benchmark Descriptions & Analysis
@@ -418,24 +418,24 @@
 //!       Since the expression is quite simple, it does a good job of showing
 //!       the intrinsic performance costs of a library.
 //!       Results:
-//!           * For compiled expressions, `fasteval` is 6x as fast as the closest
+//!           * For compiled expressions, `expre` is 6x as fast as the closest
 //!             competitor (caldyn) because the `eval_compiled!()` macro is able to
 //!             eliminate all function calls.  If the macro is not used and a
 //!             normal `expr.eval()` function call is performed instead, then
 //!             performance is very similar to caldyn's.
-//!           * For interpreted expressions, `fasteval` is 2x as fast as the
+//!           * For interpreted expressions, `expre` is 2x as fast as the
 //!             tinyexpr C lib, and 3x as fast as the tinyexpr Rust lib.
-//!             This is because `fasteval` eliminates redundant work and memory
+//!             This is because `expre` eliminates redundant work and memory
 //!             allocation during the parse phase.
 //!
 //!     * power = `2 ^ 3 ^ 4`
 //!               `2 ^ (3 ^ 4)` for `tinyexpr` and `rsc`
 //!       This test shows the associativity of the exponent operator.
-//!       Most libraries (including `fasteval`) use right-associativity,
+//!       Most libraries (including `expre`) use right-associativity,
 //!       but some libraries (particularly tinyexpr and rsc) use
 //!       left-associativity.
 //!       This test is also interesting because it shows the precision of a
-//!       library's number system.  `fasteval` just uses f64 and therefore truncates
+//!       library's number system.  `expre` just uses f64 and therefore truncates
 //!       the result (2417851639229258300000000), while python, bc, and the
 //!       tinyexpr C library produce a higher precision result
 //!       (2417851639229258349412352).
@@ -448,11 +448,11 @@
 //!       performance costs of a library's variables.
 //!       Results:
 //!           * The tinyexpr Rust library does not currently support variables.
-//!           * For safe compiled evaluation, `fasteval` is 4.4x as fast as the closest
+//!           * For safe compiled evaluation, `expre` is 4.4x as fast as the closest
 //!             competitor (caldyn).
-//!           * For safe interpretation, `fasteval` is 3.3x as fast as the closest
+//!           * For safe interpretation, `expre` is 3.3x as fast as the closest
 //!             competitor (caldyn).
-//!           * For unsafe variables, `fasteval` is 1.2x as fast as the
+//!           * For unsafe variables, `expre` is 1.2x as fast as the
 //!             tinyexpr C library.
 //!
 //!     * trig = `sin(x)`
@@ -460,48 +460,48 @@
 //!       Results:
 //!           * The tinyexpr Rust library does not currently support variables.
 //!           * The `calc` library does not support trigonometry.
-//!           * For safe compiled evaluation, `fasteval` is 2.6x as fast as the
+//!           * For safe compiled evaluation, `expre` is 2.6x as fast as the
 //!             closest competitor (caldyn).
-//!           * For safe interpretation, `fasteval` is 2.3x as fast as the closest
+//!           * For safe interpretation, `expre` is 2.3x as fast as the closest
 //!             competitor (caldyn).
 //!           * Comparing unsafe variables with the tinyexpr C library,
-//!             `fasteval` is 8% slower for compiled expressions (tinyexpr uses a
+//!             `expre` is 8% slower for compiled expressions (tinyexpr uses a
 //!             faster `sin` implementation) and 4% faster for interpreted
-//!             expressions (`fasteval` performs less memory allocation).
+//!             expressions (`expre` performs less memory allocation).
 //!
 //!     * quadratic = `(-z + (z^2 - 4*x*y)^0.5) / (2*x)`
 //!       This test demonstrates a more complex expression, involving several
 //!       variables, some of which are accessed more than once.
 //!       Results:
 //!           * The tinyexpr Rust library does not currently support variables.
-//!           * For safe compiled evaluation, `fasteval` is 2x as fast as the
+//!           * For safe compiled evaluation, `expre` is 2x as fast as the
 //!             closest competitor (rsc).
-//!           * For safe interpretation, `fasteval` is 3.7x as fast as the
+//!           * For safe interpretation, `expre` is 3.7x as fast as the
 //!             closest competitor (caldyn).
 //!           * Comparing unsafe variables with the tinyexpr C library,
-//!             `fasteval` is the same speed for compiled expressions,
+//!             `expre` is the same speed for compiled expressions,
 //!             and 1.2x as fast for interpretation.
 //!
 //!     * large = `((((87))) - 73) + (97 + (((15 / 55 * ((31)) + 35))) + (15 - (9)) - (39 / 26) / 20 / 91 + 27 / (33 * 26 + 28 - (7) / 10 + 66 * 6) + 60 / 35 - ((29) - (69) / 44 / (92)) / (89) + 2 + 87 / 47 * ((2)) * 83 / 98 * 42 / (((67)) * ((97))) / (34 / 89 + 77) - 29 + 70 * (20)) + ((((((92))) + 23 * (98) / (95) + (((99) * (41))) + (5 + 41) + 10) - (36) / (6 + 80 * 52 + (90))))`
 //!       This is a fairly large expression that highlights parsing costs.
 //!       Results:
-//!           * Since there are no variables in the expression, `fasteval` and
+//!           * Since there are no variables in the expression, `expre` and
 //!             `caldyn` compile this down to a single constant value.  That's
 //!             why these two libraries are so much faster than the rest.
-//!           * For compiled evaluation, `fasteval` is 6x as fast as `caldyn`
+//!           * For compiled evaluation, `expre` is 6x as fast as `caldyn`
 //!             because it is able to eliminate function calls with the
 //!             `eval_compiled!()` macro.
-//!           * For interpretation, `fasteval` is 2x as fast as the closest
+//!           * For interpretation, `expre` is 2x as fast as the closest
 //!             competitor (rsc).
 //!           * Comparing unsafe variables with the tinyexpr C library,
-//!             `fasteval` is 3x as fast for compiled evaluation, and
+//!             `expre` is 3x as fast for compiled evaluation, and
 //!             1.2x as fast for interpretation.
 //! ```
 //!
 //! ## Methodology
 //! I am running Ubuntu 18.04 on an Asus G55V (a 2012 laptop with Intel Core i7-3610QM CPU @ 2.3GHz - 3.3GHz).
 //!
-//! All numeric results can be found in `fasteval/benches/bench.rs`.
+//! All numeric results can be found in `expre/benches/bench.rs`.
 //!
 //! See the [detailed post about my benchmarking methology]{http://likebike.com/posts/How_To_Write_Fast_Rust_Code.html#how-to-measure}
 //! on my blog.
@@ -564,7 +564,7 @@ where
 ///
 /// # Examples
 ///
-/// [See the `fasteval` top-level documentation for examples.](../index.html#easy-evaluation)
+/// [See the `expre` top-level documentation for examples.](../index.html#easy-evaluation)
 pub fn eval(expr_str: &str, ns: &mut impl EvalNamespace) -> Result<f64, Error> {
     let mut ast = Ast::new();
     expr_str.parse_expr(&mut ast)?;

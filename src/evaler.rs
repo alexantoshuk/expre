@@ -4,6 +4,7 @@
 //! `Instruction`s also have the option of using the `eval_compiled!()` macro
 //! which is much faster for common cases.
 
+use crate::builtins::{float_eq, float_ne};
 use crate::compiler::CExpr;
 use crate::compiler::{Instruction, Instruction::*, ICV};
 use crate::error::Error;
@@ -15,93 +16,45 @@ impl CExpr {
     pub fn eval(&self, ns: &mut impl EvalNamespace) -> Result<f64, Error> {
         self.instrs.last().unwrap().eval(self, ns)
     }
-}
 
-/// The same as `evaler_ref.eval(&cexpr, &mut ns)`, but more efficient for common cases.
-///
-/// This macro is exactly the same as [`eval_compiled!()`](macro.eval_compiled.html) but
-/// is useful when you hold a reference to the evaler, rather than having ownership of it.
-///
-/// Only use this for compiled expressions.  (If you use it for interpreted
-/// expressions, it will work but will always be slower than calling `eval()` directly.)
-///
-/// This macro is able to eliminate function calls for constants and Unsafe Variables.
-/// Since evaluation is a performance-critical operation, saving some function
-/// calls actually makes a huge performance difference.
-///
-// #[macro_export]
-// macro_rules! eval_compiled_ref {
-//     ($evaler:ident, $cexpr_ref:expr, $ns_mut:expr) => {
-//         if let IConst(c) = $evaler {
-//             *c
-//         } else {
-//             #[cfg(feature = "unsafe-vars")]
-//             {
-//                 if let IUnsafeVar { ptr, .. } = $evaler {
-//                     unsafe { **ptr }
-//                 } else {
-//                     $evaler.eval($cexpr_ref, $ns_mut)?
-//                 }
-//             }
-
-//             #[cfg(not(feature = "unsafe-vars"))]
-//             $evaler.eval($cexpr_ref, $ns_mut)?
-//         }
-//     };
-//     ($evaler:expr, $cexpr_ref:expr, $ns_mut:expr) => {{
-//         let evaler = $evaler;
-//         eval_compiled_ref!(evaler, $cexpr_ref, $ns_mut)
-//     }};
-// }
-
-macro_rules! eval_icv_ref {
-    ($icv:ident, $cexpr_ref:ident, $ns_mut:expr) => {
-        match $icv {
-            ICV::IConst(c) => *c,
-            ICV::IVar(name) => match $ns_mut.lookup(name, Vec::new()) {
-                Some(f) => f,
-                None => return Err(Error::Undefined(name.to_string())),
+    #[inline(always)]
+    fn eval_icv(&self, icv: &ICV, ns: &mut impl EvalNamespace) -> Result<f64, Error> {
+        match icv {
+            ICV::IConst(c) => Ok(*c),
+            ICV::IVar(name) => match ns.lookup(name, Vec::new()) {
+                Some(f) => Ok(f),
+                None => Err(Error::Undefined(name.to_string())),
             },
             ICV::I(i) => {
-                let instr_ref = $cexpr_ref.get(*i);
+                let instr_ref = self.get(*i);
 
                 #[cfg(feature = "unsafe-vars")]
                 {
                     if let crate::IUnsafeVar { ptr, .. } = instr_ref {
                         unsafe { **ptr }
                     } else {
-                        instr_ref.eval($cexpr_ref, $ns_mut)?
+                        instr_ref.eval(self, ns)?
                     }
                 }
 
                 #[cfg(not(feature = "unsafe-vars"))]
-                instr_ref.eval($cexpr_ref, $ns_mut)?
+                instr_ref.eval(self, ns)
             }
         }
-    };
-}
+    }
 
-macro_rules! eval_var {
-    ($ns:ident, $name:ident, $args:expr) => {
-        match $ns.lookup($name, $args) {
-            Some(f) => Ok(f),
-            None => Err(Error::Undefined($name.to_string())),
-        }
-    };
-}
-
-macro_rules! var_names {
-    ($icv:ident, $cexpr_ref:expr, $dst:expr) => {
-        match $icv {
+    #[inline(always)]
+    fn var_names(&self, icv: &ICV, dst: &mut BTreeSet<String>) {
+        match icv {
             ICV::I(i) => {
-                $cexpr_ref.get(*i)._var_names($cexpr_ref, $dst);
+                self.get(*i)._var_names(self, dst);
             }
             ICV::IVar(s) => {
-                $dst.insert(s.clone());
+                dst.insert(s.clone());
             }
             _ => {}
         }
-    };
+    }
 }
 
 /// You must `use` this trait so you can call `.eval()`.
@@ -143,34 +96,34 @@ impl Evaler for Instruction {
             IFunc(name, _, nic) => {
                 dst.insert(name.clone());
                 for ic in nic {
-                    var_names!(ic, cexpr, dst);
+                    cexpr.var_names(ic, dst);
                 }
             }
 
             IFunc_1F(_, ii) => {
-                var_names!(ii, cexpr, dst);
+                cexpr.var_names(ii, dst);
             }
 
             IFunc_2F(_, ic0, ic1) => {
-                var_names!(ic0, cexpr, dst);
-                var_names!(ic1, cexpr, dst);
+                cexpr.var_names(ic0, dst);
+                cexpr.var_names(ic1, dst);
             }
 
             IFunc_3F(_, ic0, ic1, ic2) => {
-                var_names!(ic0, cexpr, dst);
-                var_names!(ic1, cexpr, dst);
-                var_names!(ic2, cexpr, dst);
+                cexpr.var_names(ic0, dst);
+                cexpr.var_names(ic1, dst);
+                cexpr.var_names(ic2, dst);
             }
 
             IFunc_1S_NF(_, _, nic) => {
                 for ic in nic {
-                    var_names!(ic, cexpr, dst);
+                    cexpr.var_names(ic, dst);
                 }
             }
 
             IConst(_) => (),
 
-            INeg(ii) | INot(ii) | IInv(ii) => var_names!(ii, cexpr, dst),
+            INeg(ii) | INot(ii) | IInv(ii) => cexpr.var_names(ii, dst),
 
             ILT(lic, ric)
             | ILTE(lic, ric)
@@ -180,8 +133,8 @@ impl Evaler for Instruction {
             | IGT(lic, ric)
             | IMod(lic, ric)
             | IExp(lic, ric) => {
-                var_names!(lic, cexpr, dst);
-                var_names!(ric, cexpr, dst);
+                cexpr.var_names(lic, dst);
+                cexpr.var_names(ric, dst);
             }
 
             IAdd(li, ric)
@@ -190,8 +143,8 @@ impl Evaler for Instruction {
             | IAND(li, ric)
             | IMin(li, ric)
             | IMax(li, ric) => {
-                var_names!(li, cexpr, dst);
-                var_names!(ric, cexpr, dst);
+                cexpr.var_names(li, dst);
+                cexpr.var_names(ric, dst);
             }
         }
     }
@@ -199,113 +152,98 @@ impl Evaler for Instruction {
     fn eval(&self, cexpr: &CExpr, ns: &mut impl EvalNamespace) -> Result<f64, Error> {
         match self {
             // I have manually ordered these match arms in a way that I feel should deliver good performance.
-            // (I don't think this ordering actually affects the generated code, though.)
-            IMul(li, ric) => Ok(eval_icv_ref!(li, cexpr, ns) * eval_icv_ref!(ric, cexpr, ns)),
-            IAdd(li, ric) => Ok(eval_icv_ref!(li, cexpr, ns) + eval_icv_ref!(ric, cexpr, ns)),
+            // (I don't think this ordering actually affects the generated code, though.)s
+            IMul(li, ric) => Ok(cexpr.eval_icv(li, ns)? * cexpr.eval_icv(ric, ns)?),
+            IAdd(li, ric) => Ok(cexpr.eval_icv(li, ns)? + cexpr.eval_icv(ric, ns)?),
 
-            IExp(base, power) => {
-                Ok(eval_icv_ref!(base, cexpr, ns).powf(eval_icv_ref!(power, cexpr, ns)))
-            }
+            IExp(base, power) => Ok(cexpr.eval_icv(base, ns)?.powf(cexpr.eval_icv(power, ns)?)),
 
-            INeg(i) => Ok(-eval_icv_ref!(i, cexpr, ns)),
+            INeg(i) => Ok(-cexpr.eval_icv(i, ns)?),
             IMod(dividend, divisor) => {
-                Ok(eval_icv_ref!(dividend, cexpr, ns) % eval_icv_ref!(divisor, cexpr, ns))
+                Ok(cexpr.eval_icv(dividend, ns)? % cexpr.eval_icv(divisor, ns)?)
             }
-            IInv(i) => Ok(1.0 / eval_icv_ref!(i, cexpr, ns)),
+            IInv(i) => Ok(1.0 / cexpr.eval_icv(i, ns)?),
 
-            IVar(name) => eval_var!(ns, name, Vec::new()),
+            IVar(name) => ns
+                .lookup(name, Vec::new())
+                .ok_or_else(|| Error::Undefined(name.to_string())),
 
             IFunc_1F(f, i) => {
-                // let v = eval_compiled_ref!(cexpr.get(*i), cexpr, ns);
-                let v = eval_icv_ref!(i, cexpr, ns);
+                let v = cexpr.eval_icv(i, ns)?;
                 Ok(f(v))
             }
 
             IFunc_2F(f, ric0, ric1) => {
-                let v0 = eval_icv_ref!(ric0, cexpr, ns);
-                let v1 = eval_icv_ref!(ric1, cexpr, ns);
+                let v0 = cexpr.eval_icv(ric0, ns)?;
+                let v1 = cexpr.eval_icv(ric1, ns)?;
                 Ok(f(v0, v1))
             }
 
             IFunc_3F(f, ric0, ric1, ric2) => {
-                let v0 = eval_icv_ref!(ric0, cexpr, ns);
-                let v1 = eval_icv_ref!(ric1, cexpr, ns);
-                let v2 = eval_icv_ref!(ric2, cexpr, ns);
+                let v0 = cexpr.eval_icv(ric0, ns)?;
+                let v1 = cexpr.eval_icv(ric1, ns)?;
+                let v2 = cexpr.eval_icv(ric2, ns)?;
                 Ok(f(v0, v1, v2))
             }
 
             IFunc_1S_NF(f, s, nic) => {
                 let mut args = Vec::with_capacity(nic.len());
                 for ic in nic {
-                    args.push(eval_icv_ref!(ic, cexpr, ns));
+                    args.push(cexpr.eval_icv(ic, ns)?);
                 }
                 Ok(f(&s, args))
             }
 
-            // IFunc(name, ics) => {
-            //     let mut args = Vec::with_capacity(ics.len());
-            //     for ic in ics {
-            //         args.push(eval_icv_ref!(ic, cexpr, ns));
-            //     }
-            //     eval_var!(ns, name, args)
-            // }
             IFunc(name, _, ics) => {
                 let mut args = Vec::with_capacity(ics.len());
                 for ic in ics {
-                    args.push(eval_icv_ref!(ic, cexpr, ns));
+                    args.push(cexpr.eval_icv(ic, ns)?);
                 }
-                eval_var!(ns, name, args)
+                ns.lookup(name, args)
+                    .ok_or_else(|| Error::Undefined(name.to_string()))
             }
 
             IMin(li, ric) => {
-                let left = eval_icv_ref!(li, cexpr, ns);
-                let right = eval_icv_ref!(ric, cexpr, ns);
+                let left = cexpr.eval_icv(li, ns)?;
+                let right = cexpr.eval_icv(ric, ns)?;
                 Ok(left.min(right))
             }
             IMax(li, ric) => {
-                let left = eval_icv_ref!(li, cexpr, ns);
-                let right = eval_icv_ref!(ric, cexpr, ns);
+                let left = cexpr.eval_icv(li, ns)?;
+                let right = cexpr.eval_icv(ric, ns)?;
                 Ok(left.max(right))
             }
 
-            IEQ(left, right) => Ok(f64_eq!(
-                eval_icv_ref!(left, cexpr, ns),
-                eval_icv_ref!(right, cexpr, ns)
-            )
-            .into()),
-            INE(left, right) => Ok(f64_ne!(
-                eval_icv_ref!(left, cexpr, ns),
-                eval_icv_ref!(right, cexpr, ns)
-            )
-            .into()),
-            ILT(left, right) => {
-                Ok((eval_icv_ref!(left, cexpr, ns) < eval_icv_ref!(right, cexpr, ns)).into())
+            IEQ(left, right) => {
+                Ok(float_eq(cexpr.eval_icv(left, ns)?, cexpr.eval_icv(right, ns)?).into())
             }
+            INE(left, right) => {
+                Ok(float_ne(cexpr.eval_icv(left, ns)?, cexpr.eval_icv(right, ns)?).into())
+            }
+            ILT(left, right) => Ok((cexpr.eval_icv(left, ns)? < cexpr.eval_icv(right, ns)?).into()),
             ILTE(left, right) => {
-                Ok((eval_icv_ref!(left, cexpr, ns) <= eval_icv_ref!(right, cexpr, ns)).into())
+                Ok((cexpr.eval_icv(left, ns)? <= cexpr.eval_icv(right, ns)?).into())
             }
             IGTE(left, right) => {
-                Ok((eval_icv_ref!(left, cexpr, ns) >= eval_icv_ref!(right, cexpr, ns)).into())
+                Ok((cexpr.eval_icv(left, ns)? >= cexpr.eval_icv(right, ns)?).into())
             }
-            IGT(left, right) => {
-                Ok((eval_icv_ref!(left, cexpr, ns) > eval_icv_ref!(right, cexpr, ns)).into())
-            }
+            IGT(left, right) => Ok((cexpr.eval_icv(left, ns)? > cexpr.eval_icv(right, ns)?).into()),
 
-            INot(i) => Ok(f64_eq!(eval_icv_ref!(i, cexpr, ns), 0.0).into()),
+            INot(i) => Ok(float_eq(cexpr.eval_icv(i, ns)?, 0.0).into()),
             IAND(li, ric) => {
-                let left = eval_icv_ref!(li, cexpr, ns);
-                if f64_eq!(left, 0.0) {
+                let left = cexpr.eval_icv(li, ns)?;
+                if float_eq(left, 0.0) {
                     Ok(left)
                 } else {
-                    Ok(eval_icv_ref!(ric, cexpr, ns))
+                    Ok(cexpr.eval_icv(ric, ns)?)
                 }
             }
             IOR(li, ric) => {
-                let left = eval_icv_ref!(li, cexpr, ns);
-                if f64_ne!(left, 0.0) {
+                let left = cexpr.eval_icv(li, ns)?;
+                if float_ne(left, 0.0) {
                     Ok(left)
                 } else {
-                    Ok(eval_icv_ref!(ric, cexpr, ns))
+                    Ok(cexpr.eval_icv(ric, ns)?)
                 }
             }
 

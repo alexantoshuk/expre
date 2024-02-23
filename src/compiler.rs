@@ -25,6 +25,8 @@
 //! * The `ICV` enumeration helps to eliminate expensive function calls.
 
 use crate::builtins;
+use crate::builtins::{float_eq, float_ne};
+
 #[cfg(feature = "unsafe-vars")]
 use crate::parser::StdFunc::EUnsafeVar;
 
@@ -39,6 +41,12 @@ use crate::parser::{
 use crate::write_indexed_list;
 use std::fmt::{self, Debug};
 use std::mem;
+
+impl Ast {
+    pub fn compile(&self, cexpr: &mut CExpr) {
+        cexpr.compile(self)
+    }
+}
 
 /// This enumeration boosts performance because it eliminates expensive function calls for constant values.
 #[derive(PartialEq)]
@@ -65,15 +73,6 @@ impl From<usize> for ICV {
     }
 }
 
-impl Ast {
-    pub fn compile(&self, cexpr: &mut CExpr) {
-        cexpr.clear();
-        let expr = self.exprs.last().unwrap();
-        let instr = expr.compile(self, cexpr);
-
-        cexpr.instrs.push(instr);
-    }
-}
 /// `CExpr` is where `compile()` results are stored.
 pub struct CExpr {
     pub(crate) instrs: Vec<Instruction>,
@@ -92,6 +91,30 @@ impl CExpr {
         Self {
             instrs: Vec::with_capacity(cap),
         }
+    }
+
+    /// Creates a new `Ast` with the given capacity.
+    #[inline]
+    pub fn compile(&mut self, ast: &Ast) {
+        self.clear();
+        let expr = ast.exprs.last().unwrap();
+        let instr = expr.compile(ast, self);
+
+        self.instrs.push(instr);
+    }
+
+    #[inline]
+    pub fn from_ast(ast: &Ast) -> Self {
+        let mut cexpr = Self::new();
+        cexpr.compile(ast);
+        cexpr
+    }
+
+    #[inline]
+    pub fn from_str<S: AsRef<str>>(expr_str: S) -> Self {
+        let mut ast = Ast::new();
+        ast.parse(expr_str);
+        Self::from_ast(&ast)
     }
 
     #[inline(always)]
@@ -136,6 +159,138 @@ impl CExpr {
     #[inline(always)]
     pub fn clear(&mut self) {
         self.instrs.clear();
+    }
+
+    #[inline(always)]
+    fn neg_wrap(&mut self, instr: Instruction) -> Instruction {
+        match instr {
+            IConst(c) => IConst(-c),
+            INeg(_) => self.pop(),
+            _ => INeg(self.instr_to_icv(instr)),
+        }
+    }
+    #[inline(always)]
+    fn not_wrap(&mut self, instr: Instruction) -> Instruction {
+        match instr {
+            IConst(c) => IConst((float_eq(c, 0.0)).into()),
+            INot(_) => self.pop(),
+            _ => INot(self.instr_to_icv(instr)),
+        }
+    }
+    #[inline(always)]
+    fn inv_wrap(&mut self, instr: Instruction) -> Instruction {
+        match instr {
+            IConst(c) => IConst(1.0 / c),
+            IInv(_) => self.pop(),
+            _ => IInv(self.instr_to_icv(instr)),
+        }
+    }
+
+    #[inline(always)]
+    fn compile_mul(&mut self, instrs: Vec<Instruction>) -> Instruction {
+        let mut out = IConst(1.0);
+        let mut out_set = false;
+        let mut const_prod = 1.0;
+        for instr in instrs {
+            if let IConst(c) = instr {
+                if c.is_nan() {
+                    return instr;
+                }
+                const_prod *= c; // Floats don't overflow.
+            } else {
+                if out_set {
+                    out = IMul(self.instr_to_icv(out), self.instr_to_icv(instr));
+                } else {
+                    out = instr;
+                    out_set = true;
+                }
+            }
+        }
+        if float_ne(const_prod, 1.0) {
+            if out_set {
+                out = IMul(self.instr_to_icv(out), ICV::IConst(const_prod));
+            } else {
+                out = IConst(const_prod);
+            }
+        }
+        out
+    }
+
+    #[inline(always)]
+    fn compile_add(&mut self, instrs: Vec<Instruction>) -> Instruction {
+        let mut out = IConst(0.0);
+        let mut out_set = false;
+        let mut const_sum = 0.0;
+        for instr in instrs {
+            if let IConst(c) = instr {
+                if c.is_nan() {
+                    return instr;
+                }
+                const_sum += c; // Floats don't overflow.
+            } else {
+                if out_set {
+                    out = IAdd(self.instr_to_icv(out), self.instr_to_icv(instr));
+                } else {
+                    out = instr;
+                    out_set = true;
+                }
+            }
+        }
+        if float_ne(const_sum, 0.0) {
+            if out_set {
+                out = IAdd(self.instr_to_icv(out), ICV::IConst(const_sum));
+            } else {
+                out = IConst(const_sum);
+            }
+        }
+        out
+    }
+
+    // Can't inline recursive functions:
+    fn push_mul_leaves(&mut self, instrs: &mut Vec<Instruction>, li: ICV, ric: ICV) {
+        // Take 'r' before 'l' for a chance for more efficient memory usage:
+        match ric {
+            ICV::I(_) => {
+                let instr = self.pop();
+                if let IMul(rli, rric) = instr {
+                    self.push_mul_leaves(instrs, rli, rric);
+                } else {
+                    instrs.push(instr);
+                }
+            }
+            ICV::IConst(c) => instrs.push(IConst(c)),
+            ICV::IVar(c) => instrs.push(IVar(c)),
+        };
+
+        let instr = self.pop();
+        if let IMul(lli, lric) = instr {
+            self.push_mul_leaves(instrs, lli, lric);
+        } else {
+            instrs.push(instr);
+        }
+    }
+    // Can't inline recursive functions:
+    fn push_add_leaves(&mut self, instrs: &mut Vec<Instruction>, li: ICV, ric: ICV) {
+        // Take 'r' before 'l' for a chance for more efficient memory usage:
+        match ric {
+            ICV::I(_) => {
+                let instr = self.pop();
+                if let IAdd(rli, rric) = instr {
+                    self.push_add_leaves(instrs, rli, rric);
+                } else {
+                    instrs.push(instr);
+                }
+            }
+            ICV::IConst(c) => instrs.push(IConst(c)),
+            ICV::IVar(c) => instrs.push(IVar(c)),
+        };
+
+        let instr = self.pop();
+        if let IAdd(lli, lric) = instr {
+            self.push_add_leaves(instrs, lli, lric);
+        } else {
+            instrs.push(instr);
+        }
     }
 }
 
@@ -255,173 +410,6 @@ impl<'s> ExprSlice<'s> {
     }
 }
 
-/// Uses [`EPSILON`](https://doc.rust-lang.org/core/f64/constant.EPSILON.html) to determine equality of two `f64`s.
-#[macro_export]
-macro_rules! f64_eq {
-    ($l:ident, $r:literal) => {
-        ($l - $r).abs() <= 8.0 * std::f64::EPSILON
-    };
-    ($l:ident, $r:ident) => {
-        ($l - $r).abs() <= 8.0 * std::f64::EPSILON
-    };
-    ($l:expr, $r:literal) => {
-        ($l - $r).abs() <= 8.0 * std::f64::EPSILON
-    };
-    ($l:expr, $r:expr) => {
-        (($l) - ($r)).abs() <= 8.0 * std::f64::EPSILON
-    };
-}
-
-/// Uses [`EPSILON`](https://doc.rust-lang.org/core/f64/constant.EPSILON.html) to determine inequality of two `f64`s.
-///
-/// This is exactly the same as saying `!f64_eq(x,y)` but it is slightly more efficient.
-#[macro_export]
-macro_rules! f64_ne {
-    ($l:ident, $r:literal) => {
-        ($l - $r).abs() > 8.0 * std::f64::EPSILON
-    };
-    ($l:ident, $r:ident) => {
-        ($l - $r).abs() > 8.0 * std::f64::EPSILON
-    };
-    ($l:expr, $r:literal) => {
-        ($l - $r).abs() > 8.0 * std::f64::EPSILON
-    };
-    ($l:expr, $r:expr) => {
-        (($l) - ($r)).abs() > 8.0 * std::f64::EPSILON
-    };
-}
-#[inline(always)]
-fn neg_wrap(instr: Instruction, cexpr: &mut CExpr) -> Instruction {
-    match instr {
-        IConst(c) => IConst(-c),
-        INeg(_) => cexpr.pop(),
-        _ => INeg(cexpr.instr_to_icv(instr)),
-    }
-}
-#[inline(always)]
-fn not_wrap(instr: Instruction, cexpr: &mut CExpr) -> Instruction {
-    match instr {
-        IConst(c) => IConst((f64_eq!(c, 0.0)).into()),
-        INot(_) => cexpr.pop(),
-        _ => INot(cexpr.instr_to_icv(instr)),
-    }
-}
-#[inline(always)]
-fn inv_wrap(instr: Instruction, cexpr: &mut CExpr) -> Instruction {
-    match instr {
-        IConst(c) => IConst(1.0 / c),
-        IInv(_) => cexpr.pop(),
-        _ => IInv(cexpr.instr_to_icv(instr)),
-    }
-}
-
-#[inline(always)]
-fn compile_mul(instrs: Vec<Instruction>, cexpr: &mut CExpr) -> Instruction {
-    let mut out = IConst(1.0);
-    let mut out_set = false;
-    let mut const_prod = 1.0;
-    for instr in instrs {
-        if let IConst(c) = instr {
-            if c.is_nan() {
-                return instr;
-            }
-            const_prod *= c; // Floats don't overflow.
-        } else {
-            if out_set {
-                out = IMul(cexpr.instr_to_icv(out), cexpr.instr_to_icv(instr));
-            } else {
-                out = instr;
-                out_set = true;
-            }
-        }
-    }
-    if f64_ne!(const_prod, 1.0) {
-        if out_set {
-            out = IMul(cexpr.instr_to_icv(out), ICV::IConst(const_prod));
-        } else {
-            out = IConst(const_prod);
-        }
-    }
-    out
-}
-
-#[inline(always)]
-fn compile_add(instrs: Vec<Instruction>, cexpr: &mut CExpr) -> Instruction {
-    let mut out = IConst(0.0);
-    let mut out_set = false;
-    let mut const_sum = 0.0;
-    for instr in instrs {
-        if let IConst(c) = instr {
-            if c.is_nan() {
-                return instr;
-            }
-            const_sum += c; // Floats don't overflow.
-        } else {
-            if out_set {
-                out = IAdd(cexpr.instr_to_icv(out), cexpr.instr_to_icv(instr));
-            } else {
-                out = instr;
-                out_set = true;
-            }
-        }
-    }
-    if f64_ne!(const_sum, 0.0) {
-        if out_set {
-            out = IAdd(cexpr.instr_to_icv(out), ICV::IConst(const_sum));
-        } else {
-            out = IConst(const_sum);
-        }
-    }
-    out
-}
-
-// Can't inline recursive functions:
-fn push_mul_leaves(instrs: &mut Vec<Instruction>, cexpr: &mut CExpr, li: ICV, ric: ICV) {
-    // Take 'r' before 'l' for a chance for more efficient memory usage:
-    match ric {
-        ICV::I(_) => {
-            let instr = cexpr.pop();
-            if let IMul(rli, rric) = instr {
-                push_mul_leaves(instrs, cexpr, rli, rric);
-            } else {
-                instrs.push(instr);
-            }
-        }
-        ICV::IConst(c) => instrs.push(IConst(c)),
-        ICV::IVar(c) => instrs.push(IVar(c)),
-    };
-
-    let instr = cexpr.pop();
-    if let IMul(lli, lric) = instr {
-        push_mul_leaves(instrs, cexpr, lli, lric);
-    } else {
-        instrs.push(instr);
-    }
-}
-
-fn push_add_leaves(instrs: &mut Vec<Instruction>, cexpr: &mut CExpr, li: ICV, ric: ICV) {
-    // Take 'r' before 'l' for a chance for more efficient memory usage:
-    match ric {
-        ICV::I(_) => {
-            let instr = cexpr.pop();
-            if let IAdd(rli, rric) = instr {
-                push_add_leaves(instrs, cexpr, rli, rric);
-            } else {
-                instrs.push(instr);
-            }
-        }
-        ICV::IConst(c) => instrs.push(IConst(c)),
-        ICV::IVar(c) => instrs.push(IVar(c)),
-    };
-
-    let instr = cexpr.pop();
-    if let IAdd(lli, lric) = instr {
-        push_add_leaves(instrs, cexpr, lli, lric);
-    } else {
-        instrs.push(instr);
-    }
-}
-
 impl Compiler for ExprSlice<'_> {
     fn compile(&self, ast: &Ast, cexpr: &mut CExpr) -> Instruction {
         // Associative:  (2+3)+4 = 2+(3+4)
@@ -469,8 +457,8 @@ impl Compiler for ExprSlice<'_> {
                 if let IConst(l) = out {
                     if let IConst(r) = instr {
                         out = match op {
-                            EEQ => IConst((f64_eq!(l, r)).into()),
-                            ENE => IConst((f64_ne!(l, r)).into()),
+                            EEQ => IConst((float_eq(l, r)).into()),
+                            ENE => IConst((float_ne(l, r)).into()),
                             ELT => IConst((l < r).into()),
                             EGT => IConst((l > r).into()),
                             ELTE => IConst((l <= r).into()),
@@ -506,7 +494,7 @@ impl Compiler for ExprSlice<'_> {
                         out = IOR(cexpr.instr_to_icv(out), cexpr.instr_to_icv(instr));
                     } else {
                         if let IConst(c) = instr {
-                            if f64_ne!(c, 0.0) {
+                            if float_ne(c, 0.0) {
                                 return instr;
                             }
                             // out = instr;     // Skip this 0 value (mostly so I don't complicate my logic in 'if out_set' since I can assume that any set value is non-const).
@@ -527,7 +515,7 @@ impl Compiler for ExprSlice<'_> {
                 for xs in xss.iter() {
                     let instr = xs.compile(ast, cexpr);
                     if let IConst(c) = instr {
-                        if f64_eq!(c, 0.0) {
+                        if float_eq(c, 0.0) {
                             return instr;
                         }
                     }
@@ -552,12 +540,12 @@ impl Compiler for ExprSlice<'_> {
                 for xs in xss {
                     let instr = xs.compile(ast, cexpr);
                     if let IAdd(li, ric) = instr {
-                        push_add_leaves(&mut instrs, cexpr, li, ric); // Flatten nested structures like "x - 1 + 2 - 3".
+                        cexpr.push_add_leaves(&mut instrs, li, ric); // Flatten nested structures like "x - 1 + 2 - 3".
                     } else {
                         instrs.push(instr);
                     }
                 }
-                compile_add(instrs, cexpr)
+                cexpr.compile_add(instrs)
             }
             ESub => {
                 // Note: We don't need to push_add_leaves from here because Sub has a higher precedence than Add.
@@ -570,10 +558,10 @@ impl Compiler for ExprSlice<'_> {
                     if i == 0 {
                         instrs.push(instr);
                     } else {
-                        instrs.push(neg_wrap(instr, cexpr));
+                        instrs.push(cexpr.neg_wrap(instr));
                     }
                 }
-                compile_add(instrs, cexpr)
+                cexpr.compile_add(instrs)
             }
             EMul => {
                 let mut xss = Vec::<ExprSlice>::with_capacity(4);
@@ -582,12 +570,12 @@ impl Compiler for ExprSlice<'_> {
                 for xs in xss {
                     let instr = xs.compile(ast, cexpr);
                     if let IMul(li, ric) = instr {
-                        push_mul_leaves(&mut instrs, cexpr, li, ric); // Flatten nested structures like "deg/360 * 2*pi()".
+                        cexpr.push_mul_leaves(&mut instrs, li, ric); // Flatten nested structures like "deg/360 * 2*pi()".
                     } else {
                         instrs.push(instr);
                     }
                 }
-                compile_mul(instrs, cexpr)
+                cexpr.compile_mul(instrs)
             }
             EDiv => {
                 // Note: We don't need to push_mul_leaves from here because Div has a higher precedence than Mul.
@@ -600,10 +588,10 @@ impl Compiler for ExprSlice<'_> {
                     if i == 0 {
                         instrs.push(instr);
                     } else {
-                        instrs.push(inv_wrap(instr, cexpr));
+                        instrs.push(cexpr.inv_wrap(instr));
                     }
                 }
-                compile_mul(instrs, cexpr)
+                cexpr.compile_mul(instrs)
             }
 
             EMod => {
@@ -614,11 +602,9 @@ impl Compiler for ExprSlice<'_> {
                 for xs in xss.iter() {
                     let instr = xs.compile(ast, cexpr);
                     if out_set {
-                        if let IConst(dividend) = out {
-                            if let IConst(divisor) = instr {
-                                out = IConst(dividend % divisor);
-                                continue;
-                            }
+                        if let (IConst(dividend), IConst(divisor)) = (&out, &instr) {
+                            out = IConst(dividend % divisor);
+                            continue;
                         }
                         out = IMod(cexpr.instr_to_icv(out), cexpr.instr_to_icv(instr));
                     } else {
@@ -637,11 +623,9 @@ impl Compiler for ExprSlice<'_> {
                 for xs in xss.into_iter().rev() {
                     let instr = xs.compile(ast, cexpr);
                     if out_set {
-                        if let IConst(power) = out {
-                            if let IConst(base) = instr {
-                                out = IConst(base.powf(power));
-                                continue;
-                            }
+                        if let (IConst(power), IConst(base)) = (&out, &instr) {
+                            out = IConst(base.powf(*power));
+                            continue;
                         }
                         out = IExp(cexpr.instr_to_icv(instr), cexpr.instr_to_icv(out));
                     } else {
@@ -651,8 +635,7 @@ impl Compiler for ExprSlice<'_> {
                 }
                 out
             }
-
-            _ => unreachable!(), // unreachable
+            _ => unreachable!(),
         }
     }
 }
@@ -673,15 +656,15 @@ impl Compiler for UnaryOp {
                 if let IConst(c) = instr {
                     IConst(-c)
                 } else {
-                    neg_wrap(instr, cexpr)
+                    cexpr.neg_wrap(instr)
                 }
             }
             ENot(i) => {
                 let instr = ast.get_val(*i).compile(ast, cexpr);
                 if let IConst(c) = instr {
-                    IConst((f64_eq!(c, 0.0)).into())
+                    IConst((float_eq(c, 0.0)).into())
                 } else {
-                    not_wrap(instr, cexpr)
+                    cexpr.not_wrap(instr)
                 }
             }
             EParen(i) => ast.get_expr(*i).compile(ast, cexpr),
