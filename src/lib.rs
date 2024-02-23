@@ -256,44 +256,6 @@
 //! }
 //! ```
 //!
-//! ## Unsafe Variables
-//! If your variables *must* be as fast as possible and you are willing to be
-//! very careful, you can build with the `unsafe-vars` feature (`cargo build
-//! --features unsafe-vars`), which enables pointer-based variables.  These
-//! unsafe variables perform 2x-4x faster than the compiled form above.  This
-//! feature is not enabled by default because it slightly slows down other
-//! non-variable operations.
-//! ```
-//! use expre::*;
-//! fn main() -> Result<(), expre::Error> {
-//!     let mut ast = expre::Ast::new();
-//!     let mut cexpr = expre::CExpr::new();
-//!
-//!     // The Unsafe Variable will use a pointer to read this memory location:
-//!     // You must make sure that this variable stays in-scope as long as the
-//!     // expression is in-use.
-//!     let mut deg : f64 = 0.0;
-//!
-//!     // Unsafe Variables must be registered before 'parse()'.
-//!     // (Normal Variables only need definitions during the 'eval' phase.)
-//!     unsafe { ast.add_unsafe_var("deg".to_string(), &deg); } // `add_unsafe_var()` only exists if the `unsafe-vars` feature is enabled: `cargo test --features unsafe-vars`
-//!
-//!     let expr_str = "sin(deg/360 * 2*pi())";
-//!     expr_str.parse_expr(&mut ast)?;
-//!     ast.compile(&mut cexpr);
-//!
-//!     let mut ns = expre::EmptyNamespace;  // We only define unsafe variables, not normal variables,
-//!                                             // so EmptyNamespace is fine.
-//!
-//!     for d in 0..360 {
-//!         deg = d as f64;
-//!         let val = cexpr.eval(&mut ns)?;
-//!         eprintln!("sin({}°) = {}", deg, val);
-//!     }
-//!
-//!     Ok(())
-//! }
-//! ```
 //!
 //! ## Let's Develop an Intuition of `expre` Internals
 //! In this advanced example, we peek into the Ast to see how expressions are

@@ -39,4 +39,3 @@ harness = false
 
 [features]
 default = []
-unsafe-vars = [] # tinyexpr-style pointer-based variables.

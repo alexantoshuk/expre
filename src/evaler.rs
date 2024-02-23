@@ -43,17 +43,6 @@ impl CExpr {
             },
             ICV::I(i) => {
                 let instr_ref = self.get(*i);
-
-                #[cfg(feature = "unsafe-vars")]
-                {
-                    if let crate::IUnsafeVar { ptr, .. } = instr_ref {
-                        unsafe { **ptr }
-                    } else {
-                        instr_ref.eval(self, ns)?
-                    }
-                }
-
-                #[cfg(not(feature = "unsafe-vars"))]
                 instr_ref.eval(self, ns)
             }
         }
@@ -87,11 +76,6 @@ impl Evaler for Instruction {
     #[inline(always)]
     fn _var_names(&self, cexpr: &CExpr, dst: &mut BTreeSet<String>) {
         match self {
-            #[cfg(feature = "unsafe-vars")]
-            IUnsafeVar { name, .. } => {
-                dst.insert(name.clone());
-            }
-
             IVar(s) => {
                 dst.insert(s.clone());
             }
@@ -234,9 +218,6 @@ impl Evaler for Instruction {
 
             // Put these last because you should be using the eval_compiled*!() macros to eliminate function calls.
             IConst(c) => Ok(*c),
-            #[cfg(feature = "unsafe-vars")]
-            IUnsafeVar { ptr, .. } => unsafe { Ok(**ptr) },
-            // _ => unreachable!(),
         }
     }
 }

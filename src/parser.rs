@@ -25,12 +25,8 @@
 
 use crate::error::Error;
 use crate::write_indexed_list;
-
-#[cfg(feature = "unsafe-vars")]
-use std::collections::BTreeMap;
 use std::fmt::{self, Debug};
 use std::ops::Deref;
-use std::ptr;
 use std::str::{from_utf8, from_utf8_unchecked};
 
 pub const DEFAULT_EXPR_LEN_LIMIT: usize = 1024 * 10;
@@ -85,11 +81,7 @@ impl<S: AsRef<str>> ParseExpr for S {
     }
 }
 
-pub struct Ast {
-    pub(crate) exprs: Vec<Expr>,
-    #[cfg(feature = "unsafe-vars")]
-    pub(crate) unsafe_vars: BTreeMap<String, *const f64>,
-}
+pub struct Ast(pub(crate) Vec<Expr>);
 
 impl Ast {
     /// Creates a new default-sized `Ast`.
@@ -101,11 +93,7 @@ impl Ast {
     /// Creates a new `Ast` with the given capacity.
     #[inline]
     pub fn with_capacity(cap: usize) -> Self {
-        Self {
-            exprs: Vec::with_capacity(cap),
-            #[cfg(feature = "unsafe-vars")]
-            unsafe_vars: BTreeMap::new(),
-        }
+        Self(Vec::with_capacity(cap))
     }
 
     #[inline]
@@ -129,21 +117,21 @@ impl Ast {
     /// Clears all data from [`Ast`](struct.ParseAST.html) and [`Ast`](struct.CompileAST.html).
     #[inline(always)]
     pub fn clear(&mut self) {
-        self.exprs.clear();
+        self.0.clear();
     }
 
     /// Returns a reference to the [`Expr`](../parser/struct.Expr.html)
-    /// located at `expr_i` within the `Ast.exprs'.
+    /// located at `expr_i` within the `Ast.0'.
     ///
     #[inline(always)]
     pub fn get_expr(&self, expr_i: I) -> &Expr {
         // I'm using this non-panic match structure to boost performance:
-        self.exprs.get(expr_i.0).unwrap()
+        self.0.get(expr_i.0).unwrap()
     }
 
     #[inline(always)]
     pub fn last(&self) -> Option<&Expr> {
-        self.exprs.last()
+        self.0.last()
     }
 
     /// Returns a reference to the [`Value`](../parser/enum.Value.html)
@@ -152,48 +140,32 @@ impl Ast {
     #[inline(always)]
     pub fn get_val(&self, val_i: I) -> &Value {
         // self.vals.get(val_i).unwrap()
-        &self.exprs.get(val_i.0).unwrap().0
+        &self.0.get(val_i.0).unwrap().0
     }
 
-    /// Appends an `Expr` to `Ast.exprs`.
-    ///
-    /// # Errors
-    ///
-    /// If `Ast.exprs` is already full, a `ASTOverflow` error is returned.
+    /// Appends an `Expr` to `Ast.0`.
     ///
     #[inline(always)]
     pub fn push_expr(&mut self, expr: Expr) -> Result<I, Error> {
-        let i = self.exprs.len();
-        // if i >= self.exprs.capacity() {
-        //     return Err(Error::ASTOverflow);
-        // }
-        self.exprs.push(expr);
+        let i = self.0.len();
+
+        self.0.push(expr);
         Ok(i.into())
     }
 
     #[inline(always)]
     pub fn push_val(&mut self, val: Value) -> Result<I, Error> {
-        let i = self.exprs.len();
-        // if i >= self.exprs.capacity() {
-        //     return Err(Error::ASTOverflow);
-        // }
-        self.exprs.push(Expr(val, vec![]));
-        Ok(i.into())
-    }
+        let i = self.0.len();
 
-    /// [See the `add_unsafe_var()` documentation above.](#unsafe-variable-registration-with-add_unsafe_var)
-    #[cfg(feature = "unsafe-vars")]
-    #[allow(clippy::trivially_copy_pass_by_ref)]
-    #[inline(always)]
-    pub unsafe fn add_unsafe_var(&mut self, name: String, ptr: &f64) {
-        self.unsafe_vars.insert(name, ptr as *const f64);
+        self.0.push(Expr(val, vec![]));
+        Ok(i.into())
     }
 }
 
 impl Debug for Ast {
     fn fmt(&self, f: &mut fmt::Formatter) -> Result<(), fmt::Error> {
         write!(f, "Ast[")?;
-        write_indexed_list(f, &self.exprs)?;
+        write_indexed_list(f, &self.0)?;
         write!(f, "]")?;
         Ok(())
     }
@@ -226,12 +198,6 @@ pub enum Value {
     EConst(f64),
     EUnaryOp(UnaryOp),
     EVar(String),
-    #[cfg(feature = "unsafe-vars")]
-    EUnsafeVar {
-        name: String,
-        ptr: *const f64,
-    },
-
     EFunc {
         name: String,
         sargs: Vec<String>, // cap=2
@@ -374,18 +340,7 @@ impl Ast {
             None => Ok(None),
             Some(varname) => {
                 match read_open_parenthesis(bs)? {
-                    None => {
-                        // VarNames without Parenthesis are always treated as custom 0-arg functions.
-
-                        #[cfg(feature = "unsafe-vars")]
-                        match ast.unsafe_vars.get(&varname) {
-                            None => Ok(Some(EVar(varname))),
-                            Some(&ptr) => Ok(Some(EUnsafeVar { name: varname, ptr })),
-                        }
-
-                        #[cfg(not(feature = "unsafe-vars"))]
-                        Ok(Some(EVar(varname)))
-                    }
+                    None => Ok(Some(EVar(varname))),
                     Some(open_parenth) => {
                         // VarNames with Parenthesis are first matched against builtins, then custom.
                         Ok(Some(self.read_func(varname, bs, depth, open_parenth)?))
@@ -443,17 +398,6 @@ impl Ast {
             args.push(self.read_expr(bs, depth + 1, false)?);
         }
 
-        #[cfg(feature = "unsafe-vars")]
-        match ast.unsafe_vars.get(&fname) {
-            None => Ok(EFunc {
-                name: fname,
-                sargs,
-                args,
-            }),
-            Some(&ptr) => Ok(EUnsafeVar { name: fname, ptr }),
-        }
-
-        #[cfg(not(feature = "unsafe-vars"))]
         Ok(EFunc {
             name: fname,
             sargs,

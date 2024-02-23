@@ -28,9 +28,6 @@ use crate::builtins;
 use crate::builtins::{float_eq, float_ne};
 use crate::error::Error;
 
-#[cfg(feature = "unsafe-vars")]
-use crate::parser::StdFunc::EUnsafeVar;
-
 // pub use crate::parser::I;
 use crate::parser::{
     Ast,
@@ -102,7 +99,7 @@ impl CExpr {
     #[inline]
     pub fn compile(&mut self, ast: &Ast) {
         self.clear();
-        let expr = ast.exprs.last().unwrap();
+        let expr = ast.0.last().unwrap();
         let instr = expr.compile(ast, self);
 
         self.instrs.push(instr);
@@ -344,11 +341,6 @@ pub enum Instruction {
 
     //---- Callables:
     IVar(String),
-    #[cfg(feature = "unsafe-vars")]
-    IUnsafeVar {
-        name: String,
-        ptr: *const f64,
-    },
     IFunc(String, Vec<String>, Vec<ICV>),
     IFunc_1F(fn(f64) -> f64, ICV),
     IFunc_2F(fn(f64, f64) -> f64, ICV, ICV),
@@ -689,11 +681,6 @@ impl Compiler for Value {
                     IVar(name.clone())
                 }
             }
-            #[cfg(feature = "unsafe-vars")]
-            EUnsafeVar { name, ptr } => IUnsafeVar {
-                name: name.clone(),
-                ptr: *ptr,
-            },
 
             EFunc { name, sargs, args } => {
                 match (name.as_str(), sargs.as_slice(), args.as_slice()) {
