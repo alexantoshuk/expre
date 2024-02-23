@@ -25,6 +25,7 @@
 
 use crate::error::Error;
 use crate::write_indexed_list;
+
 #[cfg(feature = "unsafe-vars")]
 use std::collections::BTreeMap;
 use std::fmt::{self, Debug};
@@ -161,7 +162,7 @@ impl Ast {
     /// If `Ast.exprs` is already full, a `ASTOverflow` error is returned.
     ///
     #[inline(always)]
-    pub(crate) fn push_expr(&mut self, expr: Expr) -> Result<I, Error> {
+    pub fn push_expr(&mut self, expr: Expr) -> Result<I, Error> {
         let i = self.exprs.len();
         // if i >= self.exprs.capacity() {
         //     return Err(Error::ASTOverflow);
@@ -171,7 +172,7 @@ impl Ast {
     }
 
     #[inline(always)]
-    pub(crate) fn push_val(&mut self, val: Value) -> Result<I, Error> {
+    pub fn push_val(&mut self, val: Value) -> Result<I, Error> {
         let i = self.exprs.len();
         // if i >= self.exprs.capacity() {
         //     return Err(Error::ASTOverflow);
@@ -187,6 +188,91 @@ impl Ast {
     pub unsafe fn add_unsafe_var(&mut self, name: String, ptr: &f64) {
         self.unsafe_vars.insert(name, ptr as *const f64);
     }
+}
+
+impl Debug for Ast {
+    fn fmt(&self, f: &mut fmt::Formatter) -> Result<(), fmt::Error> {
+        write!(f, "Ast[")?;
+        write_indexed_list(f, &self.exprs)?;
+        write!(f, "]")?;
+        Ok(())
+    }
+}
+
+pub(crate) type ExprPair = (BinaryOp, Value);
+
+/// An `Expr` is the top node of a parsed Ast.
+///
+/// It can be `compile()`d or `eval()`d.
+#[derive(PartialEq)]
+pub struct Expr(
+    pub Value,
+    pub Vec<ExprPair>, // cap=8
+);
+
+impl Debug for Expr {
+    fn fmt(&self, f: &mut fmt::Formatter) -> Result<(), fmt::Error> {
+        if self.1.is_empty() {
+            write!(f, "{:?}", self.0)
+        } else {
+            write!(f, "{:?}, {:?}", self.0, self.1)
+        }
+    }
+}
+
+/// A `Value` can be a Constant, a UnaryOp, a StdFunc, or a PrintFunc.
+#[derive(Debug, PartialEq)]
+pub enum Value {
+    EConst(f64),
+    EUnaryOp(UnaryOp),
+    EVar(String),
+    #[cfg(feature = "unsafe-vars")]
+    EUnsafeVar {
+        name: String,
+        ptr: *const f64,
+    },
+
+    EFunc {
+        name: String,
+        sargs: Vec<String>, // cap=2
+        args: Vec<I>,       // cap=4
+    },
+}
+use Value::*;
+
+/// Unary Operators
+#[derive(Debug, PartialEq)]
+pub enum UnaryOp {
+    EPos(I),
+    ENeg(I),
+    ENot(I),
+    EParen(I),
+}
+use UnaryOp::*;
+
+/// Binary Operators
+#[derive(Debug, PartialEq, PartialOrd, Copy, Clone)]
+pub enum BinaryOp {
+    // Sorted in order of precedence (low-priority to high-priority):
+    // Keep this order in-sync with evaler.rs.  (Search for 'rtol' and 'ltor'.)
+    EOr = 1, // Lowest Priority
+    EAnd = 2,
+    ENE = 3,
+    EEQ = 4,
+    EGTE = 5,
+    ELTE = 6,
+    EGT = 7,
+    ELT = 8,
+    EAdd = 9,
+    ESub = 10,
+    EMul = 11,
+    EDiv = 12,
+    EMod = 13,
+    EExp = 14, // Highest Priority
+}
+use BinaryOp::*;
+
+impl Ast {
     #[inline(always)]
     fn read_expr(&mut self, bs: &mut &[u8], depth: usize, expect_eof: bool) -> Result<I, Error> {
         if depth > DEFAULT_EXPR_DEPTH_LIMIT {
@@ -376,88 +462,6 @@ impl Ast {
     }
 }
 
-impl Debug for Ast {
-    fn fmt(&self, f: &mut fmt::Formatter) -> Result<(), fmt::Error> {
-        write!(f, "Ast[")?;
-        write_indexed_list(f, &self.exprs)?;
-        write!(f, "]")?;
-        Ok(())
-    }
-}
-
-pub(crate) type ExprPair = (BinaryOp, Value);
-
-/// An `Expr` is the top node of a parsed Ast.
-///
-/// It can be `compile()`d or `eval()`d.
-#[derive(PartialEq)]
-pub struct Expr(
-    pub Value,
-    pub Vec<ExprPair>, // cap=8
-);
-
-impl Debug for Expr {
-    fn fmt(&self, f: &mut fmt::Formatter) -> Result<(), fmt::Error> {
-        if self.1.is_empty() {
-            write!(f, "{:?}", self.0)
-        } else {
-            write!(f, "{:?}, {:?}", self.0, self.1)
-        }
-    }
-}
-
-/// A `Value` can be a Constant, a UnaryOp, a StdFunc, or a PrintFunc.
-#[derive(Debug, PartialEq)]
-pub enum Value {
-    EConst(f64),
-    EUnaryOp(UnaryOp),
-    EVar(String),
-    #[cfg(feature = "unsafe-vars")]
-    EUnsafeVar {
-        name: String,
-        ptr: *const f64,
-    },
-
-    EFunc {
-        name: String,
-        sargs: Vec<String>, // cap=2
-        args: Vec<I>,       // cap=4
-    },
-}
-use Value::*;
-
-/// Unary Operators
-#[derive(Debug, PartialEq)]
-pub enum UnaryOp {
-    EPos(I),
-    ENeg(I),
-    ENot(I),
-    EParen(I),
-}
-use UnaryOp::*;
-
-/// Binary Operators
-#[derive(Debug, PartialEq, PartialOrd, Copy, Clone)]
-pub enum BinaryOp {
-    // Sorted in order of precedence (low-priority to high-priority):
-    // Keep this order in-sync with evaler.rs.  (Search for 'rtol' and 'ltor'.)
-    EOR = 1, // Lowest Priority
-    EAND = 2,
-    ENE = 3,
-    EEQ = 4,
-    EGTE = 5,
-    ELTE = 6,
-    EGT = 7,
-    ELT = 8,
-    EAdd = 9,
-    ESub = 10,
-    EMul = 11,
-    EDiv = 12,
-    EMod = 13,
-    EExp = 14, // Highest Priority
-}
-use BinaryOp::*;
-
 #[inline(always)]
 fn peek(bs: &[u8]) -> Option<u8> {
     bs.first().copied()
@@ -625,12 +629,12 @@ fn read_binaryop(bs: &mut &[u8]) -> Result<Option<BinaryOp>, Error> {
             }
             b'|' if peek_is(bs, 1, b'|') => {
                 skip_n(bs, 2);
-                Ok(Some(EOR))
+                Ok(Some(EOr))
             }
 
             b'&' if peek_is(bs, 1, b'&') => {
                 skip_n(bs, 2);
-                Ok(Some(EAND))
+                Ok(Some(EAnd))
             }
             _ => Ok(None),
         },

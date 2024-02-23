@@ -17,8 +17,24 @@ impl CExpr {
         self.instrs.last().unwrap().eval(self, ns)
     }
 
+    pub fn var_names(&self) -> BTreeSet<String> {
+        self.instrs.last().unwrap().var_names(self)
+    }
+
+    fn _var_names(&self, icv: &ICV, dst: &mut BTreeSet<String>) {
+        match icv {
+            ICV::I(i) => {
+                self.get(*i)._var_names(self, dst);
+            }
+            ICV::IVar(s) => {
+                dst.insert(s.clone());
+            }
+            _ => {}
+        }
+    }
+
     #[inline(always)]
-    fn eval_icv(&self, icv: &ICV, ns: &mut impl EvalNamespace) -> Result<f64, Error> {
+    fn _eval(&self, icv: &ICV, ns: &mut impl EvalNamespace) -> Result<f64, Error> {
         match icv {
             ICV::IConst(c) => Ok(*c),
             ICV::IVar(name) => match ns.lookup(name, Vec::new()) {
@@ -40,19 +56,6 @@ impl CExpr {
                 #[cfg(not(feature = "unsafe-vars"))]
                 instr_ref.eval(self, ns)
             }
-        }
-    }
-
-    #[inline(always)]
-    fn var_names(&self, icv: &ICV, dst: &mut BTreeSet<String>) {
-        match icv {
-            ICV::I(i) => {
-                self.get(*i)._var_names(self, dst);
-            }
-            ICV::IVar(s) => {
-                dst.insert(s.clone());
-            }
-            _ => {}
         }
     }
 }
@@ -93,59 +96,52 @@ impl Evaler for Instruction {
                 dst.insert(s.clone());
             }
 
-            IFunc(name, _, nic) => {
+            IFunc(name, _, nicv) => {
                 dst.insert(name.clone());
-                for ic in nic {
-                    cexpr.var_names(ic, dst);
+                for icv in nicv {
+                    cexpr._var_names(icv, dst);
                 }
             }
 
-            IFunc_1F(_, ii) => {
-                cexpr.var_names(ii, dst);
+            INeg(icv) | INot(icv) | IInv(icv) | IFunc_1F(_, icv) => {
+                cexpr._var_names(icv, dst);
             }
 
-            IFunc_2F(_, ic0, ic1) => {
-                cexpr.var_names(ic0, dst);
-                cexpr.var_names(ic1, dst);
+            IFunc_2F(_, icv0, icv1) => {
+                cexpr._var_names(icv0, dst);
+                cexpr._var_names(icv1, dst);
             }
 
-            IFunc_3F(_, ic0, ic1, ic2) => {
-                cexpr.var_names(ic0, dst);
-                cexpr.var_names(ic1, dst);
-                cexpr.var_names(ic2, dst);
+            IFunc_3F(_, icv0, icv1, icv2) => {
+                cexpr._var_names(icv0, dst);
+                cexpr._var_names(icv1, dst);
+                cexpr._var_names(icv2, dst);
             }
 
-            IFunc_1S_NF(_, _, nic) => {
-                for ic in nic {
-                    cexpr.var_names(ic, dst);
+            IFunc_1S_NF(_, _, nicv) => {
+                for icv in nicv {
+                    cexpr._var_names(icv, dst);
                 }
             }
 
-            IConst(_) => (),
-
-            INeg(ii) | INot(ii) | IInv(ii) => cexpr.var_names(ii, dst),
-
-            ILT(lic, ric)
-            | ILTE(lic, ric)
-            | IEQ(lic, ric)
-            | INE(lic, ric)
-            | IGTE(lic, ric)
-            | IGT(lic, ric)
-            | IMod(lic, ric)
-            | IExp(lic, ric) => {
-                cexpr.var_names(lic, dst);
-                cexpr.var_names(ric, dst);
+            ILT(licv, ricv)
+            | ILTE(licv, ricv)
+            | IEQ(licv, ricv)
+            | INE(licv, ricv)
+            | IGTE(licv, ricv)
+            | IGT(licv, ricv)
+            | IMod(licv, ricv)
+            | IExp(licv, ricv)
+            | IAdd(licv, ricv)
+            | IMul(licv, ricv)
+            | IOr(licv, ricv)
+            | IAnd(licv, ricv)
+            | IMin(licv, ricv)
+            | IMax(licv, ricv) => {
+                cexpr._var_names(licv, dst);
+                cexpr._var_names(ricv, dst);
             }
-
-            IAdd(li, ric)
-            | IMul(li, ric)
-            | IOR(li, ric)
-            | IAND(li, ric)
-            | IMin(li, ric)
-            | IMax(li, ric) => {
-                cexpr.var_names(li, dst);
-                cexpr.var_names(ric, dst);
-            }
+            _ => (),
         }
     }
     #[inline]
@@ -153,97 +149,86 @@ impl Evaler for Instruction {
         match self {
             // I have manually ordered these match arms in a way that I feel should deliver good performance.
             // (I don't think this ordering actually affects the generated code, though.)s
-            IMul(li, ric) => Ok(cexpr.eval_icv(li, ns)? * cexpr.eval_icv(ric, ns)?),
-            IAdd(li, ric) => Ok(cexpr.eval_icv(li, ns)? + cexpr.eval_icv(ric, ns)?),
-
-            IExp(base, power) => Ok(cexpr.eval_icv(base, ns)?.powf(cexpr.eval_icv(power, ns)?)),
-
-            INeg(i) => Ok(-cexpr.eval_icv(i, ns)?),
-            IMod(dividend, divisor) => {
-                Ok(cexpr.eval_icv(dividend, ns)? % cexpr.eval_icv(divisor, ns)?)
-            }
-            IInv(i) => Ok(1.0 / cexpr.eval_icv(i, ns)?),
+            IMul(licv, ricv) => Ok(cexpr._eval(licv, ns)? * cexpr._eval(ricv, ns)?),
+            IAdd(licv, ricv) => Ok(cexpr._eval(licv, ns)? + cexpr._eval(ricv, ns)?),
+            IMod(licv, ricv) => Ok(cexpr._eval(licv, ns)? % cexpr._eval(ricv, ns)?),
+            IExp(base, power) => Ok(cexpr._eval(base, ns)?.powf(cexpr._eval(power, ns)?)),
+            INeg(icv) => Ok(-cexpr._eval(icv, ns)?),
+            IInv(icv) => Ok(1.0 / cexpr._eval(icv, ns)?),
 
             IVar(name) => ns
-                .lookup(name, Vec::new())
+                .lookup(name, vec![])
                 .ok_or_else(|| Error::Undefined(name.to_string())),
 
-            IFunc_1F(f, i) => {
-                let v = cexpr.eval_icv(i, ns)?;
+            IFunc_1F(f, icv) => {
+                let v = cexpr._eval(icv, ns)?;
                 Ok(f(v))
             }
 
-            IFunc_2F(f, ric0, ric1) => {
-                let v0 = cexpr.eval_icv(ric0, ns)?;
-                let v1 = cexpr.eval_icv(ric1, ns)?;
+            IFunc_2F(f, icv0, icv1) => {
+                let v0 = cexpr._eval(icv0, ns)?;
+                let v1 = cexpr._eval(icv1, ns)?;
                 Ok(f(v0, v1))
             }
 
-            IFunc_3F(f, ric0, ric1, ric2) => {
-                let v0 = cexpr.eval_icv(ric0, ns)?;
-                let v1 = cexpr.eval_icv(ric1, ns)?;
-                let v2 = cexpr.eval_icv(ric2, ns)?;
+            IFunc_3F(f, icv0, icv1, icv2) => {
+                let v0 = cexpr._eval(icv0, ns)?;
+                let v1 = cexpr._eval(icv1, ns)?;
+                let v2 = cexpr._eval(icv2, ns)?;
                 Ok(f(v0, v1, v2))
             }
 
-            IFunc_1S_NF(f, s, nic) => {
-                let mut args = Vec::with_capacity(nic.len());
-                for ic in nic {
-                    args.push(cexpr.eval_icv(ic, ns)?);
+            IFunc_1S_NF(f, s, nicv) => {
+                let mut args = Vec::with_capacity(nicv.len());
+                for icv in nicv {
+                    args.push(cexpr._eval(icv, ns)?);
                 }
                 Ok(f(&s, args))
             }
 
-            IFunc(name, _, ics) => {
-                let mut args = Vec::with_capacity(ics.len());
-                for ic in ics {
-                    args.push(cexpr.eval_icv(ic, ns)?);
+            IFunc(name, _, nicv) => {
+                let mut args = Vec::with_capacity(nicv.len());
+                for icv in nicv {
+                    args.push(cexpr._eval(icv, ns)?);
                 }
                 ns.lookup(name, args)
                     .ok_or_else(|| Error::Undefined(name.to_string()))
             }
 
-            IMin(li, ric) => {
-                let left = cexpr.eval_icv(li, ns)?;
-                let right = cexpr.eval_icv(ric, ns)?;
-                Ok(left.min(right))
+            IMin(licv, ricv) => {
+                let l = cexpr._eval(licv, ns)?;
+                let r = cexpr._eval(ricv, ns)?;
+                Ok(l.min(r))
             }
-            IMax(li, ric) => {
-                let left = cexpr.eval_icv(li, ns)?;
-                let right = cexpr.eval_icv(ric, ns)?;
-                Ok(left.max(right))
+            IMax(licv, ricv) => {
+                let l = cexpr._eval(licv, ns)?;
+                let r = cexpr._eval(ricv, ns)?;
+                Ok(l.max(r))
             }
 
-            IEQ(left, right) => {
-                Ok(float_eq(cexpr.eval_icv(left, ns)?, cexpr.eval_icv(right, ns)?).into())
-            }
-            INE(left, right) => {
-                Ok(float_ne(cexpr.eval_icv(left, ns)?, cexpr.eval_icv(right, ns)?).into())
-            }
-            ILT(left, right) => Ok((cexpr.eval_icv(left, ns)? < cexpr.eval_icv(right, ns)?).into()),
-            ILTE(left, right) => {
-                Ok((cexpr.eval_icv(left, ns)? <= cexpr.eval_icv(right, ns)?).into())
-            }
-            IGTE(left, right) => {
-                Ok((cexpr.eval_icv(left, ns)? >= cexpr.eval_icv(right, ns)?).into())
-            }
-            IGT(left, right) => Ok((cexpr.eval_icv(left, ns)? > cexpr.eval_icv(right, ns)?).into()),
+            IEQ(licv, ricv) => Ok(float_eq(cexpr._eval(licv, ns)?, cexpr._eval(ricv, ns)?).into()),
+            INE(licv, ricv) => Ok(float_ne(cexpr._eval(licv, ns)?, cexpr._eval(ricv, ns)?).into()),
+            ILT(licv, ricv) => Ok((cexpr._eval(licv, ns)? < cexpr._eval(ricv, ns)?).into()),
+            ILTE(licv, ricv) => Ok((cexpr._eval(licv, ns)? <= cexpr._eval(ricv, ns)?).into()),
+            IGTE(licv, ricv) => Ok((cexpr._eval(licv, ns)? >= cexpr._eval(ricv, ns)?).into()),
+            IGT(licv, ricv) => Ok((cexpr._eval(licv, ns)? > cexpr._eval(ricv, ns)?).into()),
 
-            INot(i) => Ok(float_eq(cexpr.eval_icv(i, ns)?, 0.0).into()),
-            IAND(li, ric) => {
-                let left = cexpr.eval_icv(li, ns)?;
-                if float_eq(left, 0.0) {
-                    Ok(left)
+            INot(icv) => Ok(float_eq(cexpr._eval(icv, ns)?, 0.0).into()),
+
+            IAnd(licv, ricv) => {
+                let l = cexpr._eval(licv, ns)?;
+                if float_eq(l, 0.0) {
+                    Ok(l)
                 } else {
-                    Ok(cexpr.eval_icv(ric, ns)?)
+                    Ok(cexpr._eval(ricv, ns)?)
                 }
             }
-            IOR(li, ric) => {
-                let left = cexpr.eval_icv(li, ns)?;
-                if float_ne(left, 0.0) {
-                    Ok(left)
+            IOr(licv, ricv) => {
+                let l = cexpr._eval(licv, ns)?;
+                if float_ne(l, 0.0) {
+                    Ok(l)
                 } else {
-                    Ok(cexpr.eval_icv(ric, ns)?)
+                    Ok(cexpr._eval(ricv, ns)?)
                 }
             }
 

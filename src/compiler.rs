@@ -26,6 +26,7 @@
 
 use crate::builtins;
 use crate::builtins::{float_eq, float_ne};
+use crate::error::Error;
 
 #[cfg(feature = "unsafe-vars")]
 use crate::parser::StdFunc::EUnsafeVar;
@@ -48,7 +49,11 @@ impl Ast {
     }
 }
 
-/// This enumeration boosts performance because it eliminates expensive function calls for constant values.
+pub fn compile(ast: &Ast, cexpr: &mut CExpr) {
+    CExpr::compile(cexpr, ast)
+}
+
+/// This enumeration boosts performance because it eliminates expensive function calls and redirection for constant values and vars.
 #[derive(PartialEq)]
 pub enum ICV {
     I(usize),
@@ -111,10 +116,8 @@ impl CExpr {
     }
 
     #[inline]
-    pub fn from_str<S: AsRef<str>>(expr_str: S) -> Self {
-        let mut ast = Ast::new();
-        ast.parse(expr_str);
-        Self::from_ast(&ast)
+    pub fn from_str<S: AsRef<str>>(expr_str: S) -> Result<Self, Error> {
+        Ast::from_str(expr_str).map(|ast| Self::from_ast(&ast))
     }
 
     #[inline(always)]
@@ -169,6 +172,7 @@ impl CExpr {
             _ => INeg(self.instr_to_icv(instr)),
         }
     }
+
     #[inline(always)]
     fn not_wrap(&mut self, instr: Instruction) -> Instruction {
         match instr {
@@ -335,8 +339,8 @@ pub enum Instruction {
     IGT(ICV, ICV),
 
     //---- Binary Logic Ops:
-    IOR(ICV, ICV),
-    IAND(ICV, ICV),
+    IOr(ICV, ICV),
+    IAnd(ICV, ICV),
 
     //---- Callables:
     IVar(String),
@@ -483,15 +487,15 @@ impl Compiler for ExprSlice<'_> {
         }
 
         match lowest_op {
-            EOR => {
+            EOr => {
                 let mut xss = Vec::<ExprSlice>::with_capacity(4);
-                self.split(EOR, &mut xss);
+                self.split(EOr, &mut xss);
                 let mut out = IConst(0.0);
                 let mut out_set = false;
                 for xs in xss.iter() {
                     let instr = xs.compile(ast, cexpr);
                     if out_set {
-                        out = IOR(cexpr.instr_to_icv(out), cexpr.instr_to_icv(instr));
+                        out = IOr(cexpr.instr_to_icv(out), cexpr.instr_to_icv(instr));
                     } else {
                         if let IConst(c) = instr {
                             if float_ne(c, 0.0) {
@@ -507,9 +511,9 @@ impl Compiler for ExprSlice<'_> {
                 }
                 out
             }
-            EAND => {
+            EAnd => {
                 let mut xss = Vec::<ExprSlice>::with_capacity(4);
-                self.split(EAND, &mut xss);
+                self.split(EAnd, &mut xss);
                 let mut out = IConst(1.0);
                 let mut out_set = false;
                 for xs in xss.iter() {
@@ -524,7 +528,7 @@ impl Compiler for ExprSlice<'_> {
                             // If we get here, we know that the const is non-zero.
                             out = instr;
                         } else {
-                            out = IAND(cexpr.instr_to_icv(out), cexpr.instr_to_icv(instr));
+                            out = IAnd(cexpr.instr_to_icv(out), cexpr.instr_to_icv(instr));
                         }
                     } else {
                         out = instr;

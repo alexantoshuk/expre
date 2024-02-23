@@ -238,17 +238,17 @@
 //! use expre::*;    // use this trait so we can call eval().
 //! fn main() -> Result<(), expre::Error> {
 //!     let mut ast = expre::Ast::new();
-//!     let mut oast = expre::CExpr::new();
+//!     let mut cexpr = expre::CExpr::new();
 //!     let mut map = BTreeMap::new();
 //!
 //!     let expr_str = "sin(deg/360 * 2*pi())";
 //!     expr_str.parse_expr( &mut ast)?;
-//!     ast.compile( &mut oast);
+//!     ast.compile( &mut cexpr);
 //!     for deg in 0..360 {
 //!         map.insert("deg".to_string(), deg as f64);
 //!         // When working with compiled constant expressions, you can use the
 //!         // eval_compiled*!() macros to save a function call:
-//!         let val = oast.eval(&mut map)?;
+//!         let val = cexpr.eval(&mut map)?;
 //!         eprintln!("sin({}°) = {}", deg, val);
 //!     }
 //!
@@ -267,7 +267,7 @@
 //! use expre::*;
 //! fn main() -> Result<(), expre::Error> {
 //!     let mut ast = expre::Ast::new();
-//!     let mut oast = expre::CExpr::new();
+//!     let mut cexpr = expre::CExpr::new();
 //!
 //!     // The Unsafe Variable will use a pointer to read this memory location:
 //!     // You must make sure that this variable stays in-scope as long as the
@@ -280,14 +280,14 @@
 //!
 //!     let expr_str = "sin(deg/360 * 2*pi())";
 //!     expr_str.parse_expr(&mut ast)?;
-//!     ast.compile(&mut oast);
+//!     ast.compile(&mut cexpr);
 //!
 //!     let mut ns = expre::EmptyNamespace;  // We only define unsafe variables, not normal variables,
 //!                                             // so EmptyNamespace is fine.
 //!
 //!     for d in 0..360 {
 //!         deg = d as f64;
-//!         let val = oast.eval(&mut ns)?;
+//!         let val = cexpr.eval(&mut ns)?;
 //!         eprintln!("sin({}°) = {}", deg, val);
 //!     }
 //!
@@ -302,7 +302,7 @@
 //! use expre::*;  // use this trait so we can call compile().
 //! fn main() -> Result<(), expre::Error> {
 //!     let mut ast = expre::Ast::new();
-//!     let mut oast = expre::CExpr::new();
+//!     let mut cexpr = expre::CExpr::new();
 //!
 //!     let expr_str = "sin(deg/360 * 2*pi())";
 //!     expr_str.parse_expr(&mut ast)?;
@@ -325,7 +325,7 @@
 //!                //     },
 //!                // }
 //!
-//!     ast.compile( &mut oast);
+//!     ast.compile( &mut cexpr);
 //!
 //!     // Let's take a look at the compilation results and the Ast inside the Ast:
 //!     // Notice that compilation has performed constant-folding: 1/360 * 2*pi = 0.017453292519943295
@@ -334,9 +334,9 @@
 //!     //                       IMul(...) represents the multiplication operator.
 //!     //                       'C(0.017...)' represents a constant value of 0.017... .
 //!     //                       IVar("deg") represents a variable named "deg".
-//!     assert_eq!(format!("{:?}", oast.last().unwrap()),
+//!     assert_eq!(format!("{:?}", cexpr.last().unwrap()),
 //!                "IFuncSin(1)");
-//!     assert_eq!(format!("{:?}", oast),
+//!     assert_eq!(format!("{:?}", cexpr),
 //!                r#"CExpr { 0:IVar("deg"), 1:IMul(0, IConst(0.017453292519943295)), 2:IFuncSin(1) }"#);
 //!
 //!     Ok(())
@@ -506,25 +506,20 @@
 //! See the [detailed post about my benchmarking methology]{http://likebike.com/posts/How_To_Write_Fast_Rust_Code.html#how-to-measure}
 //! on my blog.
 
-//#![feature(test)]
 //#![warn(missing_docs)]
 
 pub mod builtins;
-pub mod error;
-#[macro_use]
-pub mod parser;
-#[macro_use]
 pub mod compiler;
+pub mod error;
 pub mod evaler;
 pub mod evalns;
+pub mod parser;
 #[cfg(feature = "unsafe-vars")]
 pub use self::compiler::Instruction::IUnsafeVar;
-pub use self::compiler::{CExpr, Instruction};
+pub use self::compiler::*;
 pub use self::error::Error;
-pub use self::evalns::{
-    Cached, CachedCallbackNamespace, EmptyNamespace, EvalNamespace, LayeredStringToF64Namespace,
-    StrToCallbackNamespace, StrToF64Namespace, StringToCallbackNamespace, StringToF64Namespace,
-};
+pub use self::evaler::*;
+pub use self::evalns::*;
 
 pub use self::parser::{parse, Ast, ParseExpr};
 use std::fmt;
@@ -566,21 +561,16 @@ where
 ///
 /// [See the `expre` top-level documentation for examples.](../index.html#easy-evaluation)
 pub fn eval(expr_str: &str, ns: &mut impl EvalNamespace) -> Result<f64, Error> {
-    let mut ast = Ast::new();
-    expr_str.parse_expr(&mut ast)?;
-
-    let mut oast = CExpr::new();
-    ast.compile(&mut oast);
-    oast.eval(ns)
+    CExpr::from_str(expr_str)?.eval(ns)
 }
 
 pub fn eval2(
     expr_str: &str,
     ast: &mut Ast,
-    oast: &mut CExpr,
+    cexpr: &mut CExpr,
     ns: &mut impl EvalNamespace,
 ) -> Result<f64, Error> {
     expr_str.parse_expr(ast)?;
-    ast.compile(oast);
-    oast.eval(ns)
+    ast.compile(cexpr);
+    cexpr.eval(ns)
 }
