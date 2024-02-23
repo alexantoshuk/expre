@@ -56,6 +56,7 @@ pub(crate) fn func_1f<F: Float>(name: &str) -> Option<fn(F) -> F> {
 #[inline(always)]
 pub(crate) fn func_2f<F: Float>(name: &str) -> Option<fn(F, F) -> F> {
     match name {
+        "pow" => Some(F::powf),
         "log" => Some(F::log),
         "round" => Some(round_to),
         "hypot" => Some(F::hypot),
