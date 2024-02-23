@@ -108,7 +108,7 @@ impl Ast {
     }
 
     #[inline]
-    pub fn parsed<S: AsRef<str>>(expr_str: S) -> Result<Ast, Error> {
+    pub fn from_str<S: AsRef<str>>(expr_str: S) -> Result<Ast, Error> {
         let mut ast = Self::new();
         ast.parse(expr_str).map(|_| ast)
     }
