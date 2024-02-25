@@ -72,7 +72,6 @@ pub(crate) fn func_3f<F: Float>(name: &str) -> Option<fn(F, F, F) -> F> {
         "clamp" => Some(clamp),
         "lerp" => Some(lerp),
         "fit01" => Some(fit01),
-
         _ => None,
     }
 }

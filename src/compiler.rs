@@ -132,18 +132,9 @@ impl CExpr {
         self.instrs.get(instr_i).unwrap()
     }
 
-    #[inline(always)]
-    pub fn instr_to_icv(&mut self, instr: Instruction) -> ICV {
-        match instr {
-            IConst(c) => ICV::IConst(c),
-            IVar(s) => ICV::IVar(s),
-            _ => ICV::from(self.push(instr)),
-        }
-    }
-
     /// Appends an `Instruction` to `CExpr.instrs`.
     #[inline(always)]
-    fn push(&mut self, instr: Instruction) -> usize {
+    pub fn push(&mut self, instr: Instruction) -> usize {
         let i = self.instrs.len();
         self.instrs.push(instr);
         i
@@ -151,7 +142,7 @@ impl CExpr {
 
     /// Removes an `Instruction` from `CExpr.instrs` as efficiently as possible.
     #[inline(always)]
-    fn pop(&mut self) -> Instruction {
+    pub fn pop(&mut self) -> Instruction {
         self.instrs.pop().unwrap()
     }
 
@@ -161,6 +152,82 @@ impl CExpr {
         self.instrs.clear();
     }
 
+    #[inline(always)]
+    pub fn instr_to_icv(&mut self, instr: Instruction) -> ICV {
+        match instr {
+            IConst(c) => ICV::IConst(c),
+            IVar(s) => ICV::IVar(s),
+            _ => ICV::from(self.push(instr)),
+        }
+    }
+}
+
+impl Debug for CExpr {
+    fn fmt(&self, f: &mut fmt::Formatter) -> Result<(), fmt::Error> {
+        write!(f, "CExpr[")?;
+        write_indexed_list(f, &self.instrs)?;
+        write!(f, "]")?;
+        Ok(())
+    }
+}
+
+/// An `Instruction` is an optimized Ast node resulting from compilation.
+#[allow(non_camel_case_types)]
+#[derive(Debug, PartialEq)]
+pub enum Instruction {
+    //---- Primitive Value Types:
+    IConst(f64),
+
+    //---- Unary Ops:
+    // Parentheses is a noop
+    // Pos is a noop
+    INeg(ICV),
+    INot(ICV),
+    IInv(ICV),
+
+    //---- Binary Math Ops:
+    IAdd(ICV, ICV),
+    // A Sub(x) is converted to an Add(Neg(x)).
+    IMul(ICV, ICV),
+    // A Div(n,d) is converted to a Mul(n,Inv(d)).
+    IMod(ICV, ICV),
+
+    IExp(ICV, ICV),
+
+    //---- Binary Comparison Ops:
+    ILT(ICV, ICV),
+    ILTE(ICV, ICV),
+    IEQ(ICV, ICV),
+    INE(ICV, ICV),
+    IGTE(ICV, ICV),
+    IGT(ICV, ICV),
+
+    //---- Binary Logic Ops:
+    IOr(ICV, ICV),
+    IAnd(ICV, ICV),
+
+    //---- Callables:
+    IVar(String),
+    IFunc(String, Vec<String>, Vec<ICV>),
+    IFunc_1F(fn(f64) -> f64, ICV),
+    IFunc_2F(fn(f64, f64) -> f64, ICV, ICV),
+    IFunc_3F(fn(f64, f64, f64) -> f64, ICV, ICV, ICV),
+    IFunc_1S_NF(fn(&str, Vec<f64>) -> f64, String, Vec<ICV>),
+
+    IMin(ICV, ICV),
+    IMax(ICV, ICV),
+}
+use Instruction::*;
+
+/// You must `use` the `Compiler` trait before you can call `.compile()` on parsed `Expr`s.
+pub trait Compiler {
+    /// Turns a parsed `Expr` into a compiled `Instruction`.
+    ///
+    /// Cannot fail, unless you run out of memory.
+    fn compile(&self, ast: &Ast, cexpr: &mut CExpr) -> Instruction;
+}
+
+impl CExpr {
     #[inline(always)]
     fn neg_wrap(&mut self, instr: Instruction) -> Instruction {
         match instr {
@@ -293,71 +360,6 @@ impl CExpr {
             instrs.push(instr);
         }
     }
-}
-
-impl Debug for CExpr {
-    fn fmt(&self, f: &mut fmt::Formatter) -> Result<(), fmt::Error> {
-        write!(f, "CExpr[")?;
-        write_indexed_list(f, &self.instrs)?;
-        write!(f, "]")?;
-        Ok(())
-    }
-}
-
-/// An `Instruction` is an optimized Ast node resulting from compilation.
-#[allow(non_camel_case_types)]
-#[derive(Debug, PartialEq)]
-pub enum Instruction {
-    //---- Primitive Value Types:
-    IConst(f64),
-
-    //---- Unary Ops:
-    // Parentheses is a noop
-    // Pos is a noop
-    INeg(ICV),
-    INot(ICV),
-    IInv(ICV),
-
-    //---- Binary Math Ops:
-    IAdd(ICV, ICV),
-    // A Sub(x) is converted to an Add(Neg(x)).
-    IMul(ICV, ICV),
-    // A Div(n,d) is converted to a Mul(n,Inv(d)).
-    IMod(ICV, ICV),
-
-    IExp(ICV, ICV),
-
-    //---- Binary Comparison Ops:
-    ILT(ICV, ICV),
-    ILTE(ICV, ICV),
-    IEQ(ICV, ICV),
-    INE(ICV, ICV),
-    IGTE(ICV, ICV),
-    IGT(ICV, ICV),
-
-    //---- Binary Logic Ops:
-    IOr(ICV, ICV),
-    IAnd(ICV, ICV),
-
-    //---- Callables:
-    IVar(String),
-    IFunc(String, Vec<String>, Vec<ICV>),
-    IFunc_1F(fn(f64) -> f64, ICV),
-    IFunc_2F(fn(f64, f64) -> f64, ICV, ICV),
-    IFunc_3F(fn(f64, f64, f64) -> f64, ICV, ICV, ICV),
-    IFunc_1S_NF(fn(&str, Vec<f64>) -> f64, String, Vec<ICV>),
-
-    IMin(ICV, ICV),
-    IMax(ICV, ICV),
-}
-use Instruction::*;
-
-/// You must `use` the `Compiler` trait before you can call `.compile()` on parsed `Expr`s.
-pub trait Compiler {
-    /// Turns a parsed `Expr` into a compiled `Instruction`.
-    ///
-    /// Cannot fail, unless you run out of memory.
-    fn compile(&self, ast: &Ast, cexpr: &mut CExpr) -> Instruction;
 }
 
 #[derive(Debug)]

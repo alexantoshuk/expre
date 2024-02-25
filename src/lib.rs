@@ -522,7 +522,7 @@ where
 /// # Examples
 ///
 /// [See the `expre` top-level documentation for examples.](../index.html#easy-evaluation)
-pub fn eval(expr_str: &str, ns: &mut impl EvalNamespace) -> Result<f64, Error> {
+pub fn eval(expr_str: &str, ns: &impl EvalNamespace) -> Result<f64, Error> {
     CExpr::from_str(expr_str)?.eval(ns)
 }
 
@@ -530,7 +530,7 @@ pub fn eval2(
     expr_str: &str,
     ast: &mut Ast,
     cexpr: &mut CExpr,
-    ns: &mut impl EvalNamespace,
+    ns: &impl EvalNamespace,
 ) -> Result<f64, Error> {
     expr_str.parse_expr(ast)?;
     ast.compile(cexpr);

@@ -13,7 +13,7 @@ use std::collections::BTreeSet;
 use std::fmt;
 
 impl CExpr {
-    pub fn eval(&self, ns: &mut impl EvalNamespace) -> Result<f64, Error> {
+    pub fn eval(&self, ns: &impl EvalNamespace) -> Result<f64, Error> {
         self.instrs.last().unwrap().eval(self, ns)
     }
 
@@ -34,7 +34,7 @@ impl CExpr {
     }
 
     #[inline(always)]
-    fn _eval(&self, icv: &ICV, ns: &mut impl EvalNamespace) -> Result<f64, Error> {
+    fn _eval(&self, icv: &ICV, ns: &impl EvalNamespace) -> Result<f64, Error> {
         match icv {
             ICV::IConst(c) => Ok(*c),
             ICV::IVar(name) => match ns.lookup(name, Vec::new()) {
@@ -54,7 +54,7 @@ pub trait Evaler: fmt::Debug {
     /// Evaluate this `Expr`/`Instruction` and return an `f64`.
     ///
     /// Returns a `fasteval::Error` if there are any problems, such as undefined variables.
-    fn eval(&self, cexpr: &CExpr, ns: &mut impl EvalNamespace) -> Result<f64, Error>;
+    fn eval(&self, cexpr: &CExpr, ns: &impl EvalNamespace) -> Result<f64, Error>;
 
     /// Don't call this directly.  Use `var_names()` instead.
     ///
@@ -129,7 +129,7 @@ impl Evaler for Instruction {
         }
     }
     #[inline]
-    fn eval(&self, cexpr: &CExpr, ns: &mut impl EvalNamespace) -> Result<f64, Error> {
+    fn eval(&self, cexpr: &CExpr, ns: &impl EvalNamespace) -> Result<f64, Error> {
         match self {
             // I have manually ordered these match arms in a way that I feel should deliver good performance.
             // (I don't think this ordering actually affects the generated code, though.)s
