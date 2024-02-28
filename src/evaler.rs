@@ -23,7 +23,7 @@ impl CExpr {
 
     fn _var_names(&self, icv: &ICV, dst: &mut BTreeSet<String>) {
         match icv {
-            ICV::I(i, _) => {
+            ICV::I(i) => {
                 self.get(*i)._var_names(self, dst);
             }
             ICV::IVar(s) => {
@@ -41,7 +41,8 @@ impl CExpr {
                 Some(f) => Ok(f),
                 None => Err(Error::Undefined(name.to_string())),
             },
-            ICV::I(i, cache) => self._eval_ref(*i, *cache, ctx),
+            ICV::I(i) => self.get(*i).eval(self, ctx),
+            ICV::IRef(i, cache) => self._eval_ref(*i, *cache, ctx),
         }
     }
 
@@ -179,12 +180,50 @@ impl Evaler for Instruction {
                 Ok(f(v0, v1, v2))
             }
 
+            IFunc_4F(f, icv0, icv1, icv2, icv3) => {
+                let v0 = cexpr._eval(icv0, ctx)?;
+                let v1 = cexpr._eval(icv1, ctx)?;
+                let v2 = cexpr._eval(icv2, ctx)?;
+                let v3 = cexpr._eval(icv3, ctx)?;
+                Ok(f(v0, v1, v2, v3))
+            }
+
+            IFunc_5F(f, icv0, icv1, icv2, icv3, icv4) => {
+                let v0 = cexpr._eval(icv0, ctx)?;
+                let v1 = cexpr._eval(icv1, ctx)?;
+                let v2 = cexpr._eval(icv2, ctx)?;
+                let v3 = cexpr._eval(icv3, ctx)?;
+                let v4 = cexpr._eval(icv4, ctx)?;
+                Ok(f(v0, v1, v2, v3, v4))
+            }
+
             IFunc_1S_NF(f, s, nicv) => {
                 let mut args = Vec::with_capacity(nicv.len());
                 for icv in nicv {
                     args.push(cexpr._eval(icv, ctx)?);
                 }
                 Ok(f(&s, &args))
+            }
+
+            IFunc_NF(f, nicv) => {
+                let mut args = Vec::with_capacity(nicv.len());
+                for icv in nicv {
+                    args.push(cexpr._eval(icv, ctx)?);
+                }
+                Ok(f(&args))
+            }
+
+            IFunc_NS_NF(f, ns, nicv) => {
+                let mut args = Vec::with_capacity(nicv.len());
+                for icv in nicv {
+                    args.push(cexpr._eval(icv, ctx)?);
+                }
+
+                let mut sargs = Vec::with_capacity(ns.len());
+                for s in ns.iter() {
+                    sargs.push(s.as_str());
+                }
+                Ok(f(&sargs, &args))
             }
 
             IFunc(name, _, nicv) => {
@@ -240,7 +279,7 @@ impl Evaler for Instruction {
             // Put these last because you should be using the eval_compiled*!() macros to eliminate function calls.
             IConst(c) => Ok(*c),
             IRef(i, cache) => cexpr._eval_ref(*i, *cache, ctx),
-            // _ => unreachable!(),
+            // _ => unimplemented!(),
         }
     }
 }

@@ -88,9 +88,11 @@ pub trait Module<F: Float> {
     fn func_1s_nf(name: &str) -> Option<fn(&str, &[F]) -> F> {
         None
     }
+
     fn func_2s_nf(name: &str) -> Option<fn(&str, &str, &[F]) -> F> {
         None
     }
+
     fn func_ns_nf(name: &str) -> Option<fn(&[&str], &[F]) -> F> {
         None
     }

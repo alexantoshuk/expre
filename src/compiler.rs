@@ -31,12 +31,11 @@ use crate::module::*;
 use std::cell::UnsafeCell;
 // pub use crate::parser::I;
 use crate::parser::{
-    Ast,
+    self, Ast,
     BinaryOp::{self, *},
     Expr, ExprPair,
     UnaryOp::{self, *},
     Value::{self, *},
-    I,
 };
 use crate::write_indexed_list;
 use std::collections::{BTreeMap, BTreeSet};
@@ -56,19 +55,23 @@ pub fn compile(ast: &Ast, cexpr: &mut CExpr) {
 /// This enumeration boosts performance because it eliminates expensive function calls and redirection for constant values and vars.
 #[derive(PartialEq, Clone)]
 pub enum ICV {
-    I(usize, bool), // bool for caching enable/disable
+    I(usize), // bool for caching enable/disable
     IConst(f64),
     IVar(String),
+    IRef(usize, bool),
 }
 
 impl Debug for ICV {
     fn fmt(&self, f: &mut fmt::Formatter) -> Result<(), fmt::Error> {
         match self {
-            ICV::I(i, cache) => {
+            ICV::I(i) => {
+                write!(f, ":{:?}", i)
+            }
+            ICV::IRef(i, cache) => {
                 if *cache {
-                    write!(f, ":&{:?}", i)
+                    write!(f, "IRef(:{:?})", i)
                 } else {
-                    write!(f, ":{:?}", i)
+                    write!(f, "IRef(:{:?})", i)
                 }
             }
             ICV::IConst(v) => write!(f, "IConst({:?})", v),
@@ -77,17 +80,10 @@ impl Debug for ICV {
     }
 }
 
-impl From<usize> for ICV {
-    #[inline(always)]
-    fn from(value: usize) -> Self {
-        ICV::I(value, false)
-    }
-}
-
 /// `CExpr` is where `compile()` results are stored.
 pub struct CExpr {
     pub(crate) instrs: Vec<Instruction>,
-    local_vars: BTreeMap<I, ICV>,
+    local_vars: BTreeMap<parser::I, usize>,
     pub(crate) cache: UnsafeCell<BTreeMap<usize, f64>>,
 }
 
@@ -170,8 +166,8 @@ impl CExpr {
         match instr {
             IConst(c) => ICV::IConst(c),
             IVar(s) => ICV::IVar(s),
-            IRef(i, c) => ICV::I(i, c),
-            _ => ICV::from(self.push(instr)),
+            IRef(i, c) => ICV::IRef(i, c),
+            _ => ICV::I(self.push(instr)),
         }
     }
 }
@@ -227,7 +223,12 @@ pub enum Instruction {
     IFunc_1F(fn(f64) -> f64, ICV),
     IFunc_2F(fn(f64, f64) -> f64, ICV, ICV),
     IFunc_3F(fn(f64, f64, f64) -> f64, ICV, ICV, ICV),
+    IFunc_4F(fn(f64, f64, f64, f64) -> f64, ICV, ICV, ICV, ICV),
+    IFunc_5F(fn(f64, f64, f64, f64, f64) -> f64, ICV, ICV, ICV, ICV, ICV),
+    IFunc_NF(fn(&[f64]) -> f64, Vec<ICV>),
+
     IFunc_1S_NF(fn(&str, &[f64]) -> f64, String, Vec<ICV>),
+    IFunc_NS_NF(fn(&[&str], &[f64]) -> f64, Vec<String>, Vec<ICV>),
 
     IMin(ICV, ICV),
     IMax(ICV, ICV),
@@ -341,8 +342,9 @@ impl CExpr {
                     instrs.push(instr);
                 }
             }
+            ICV::IRef(i, c) => instrs.push(IRef(i, c)),
             ICV::IConst(c) => instrs.push(IConst(c)),
-            ICV::IVar(c) => instrs.push(IVar(c)),
+            ICV::IVar(s) => instrs.push(IVar(s)),
         };
 
         match licv {
@@ -354,8 +356,9 @@ impl CExpr {
                     instrs.push(instr);
                 }
             }
+            ICV::IRef(i, c) => instrs.push(IRef(i, c)),
             ICV::IConst(c) => instrs.push(IConst(c)),
-            ICV::IVar(c) => instrs.push(IVar(c)),
+            ICV::IVar(s) => instrs.push(IVar(s)),
         };
     }
     // Can't inline recursive functions:
@@ -370,10 +373,10 @@ impl CExpr {
                     instrs.push(instr);
                 }
             }
+            ICV::IRef(i, c) => instrs.push(IRef(i, c)),
             ICV::IConst(c) => instrs.push(IConst(c)),
             ICV::IVar(c) => instrs.push(IVar(c)),
         };
-
         match licv {
             ICV::I(..) => {
                 let instr = self.pop();
@@ -383,8 +386,9 @@ impl CExpr {
                     instrs.push(instr);
                 }
             }
+            ICV::IRef(i, c) => instrs.push(IRef(i, c)),
             ICV::IConst(c) => instrs.push(IConst(c)),
-            ICV::IVar(c) => instrs.push(IVar(c)),
+            ICV::IVar(s) => instrs.push(IVar(s)),
         };
     }
 }
@@ -574,6 +578,7 @@ impl Compiler for ExprSlice<'_> {
                 }
                 cexpr.compile_add(instrs)
             }
+
             ESub => {
                 // Note: We don't need to push_add_leaves from here because Sub has a higher precedence than Add.
 
@@ -707,21 +712,13 @@ impl Compiler for Value {
             EUnaryOp(u) => u.compile(ast, cexpr),
 
             ERef(i) => {
-                if let Some(icv) = cexpr.local_vars.get(i) {
-                    match icv {
-                        ICV::IConst(f) => IConst(*f),
-                        ICV::IVar(s) => IVar(s.clone()),
-                        ICV::I(i, _) => IRef(*i, true),
-                    }
+                if let Some(ii) = cexpr.local_vars.get(i) {
+                    IRef(*ii, true)
                 } else {
                     let instr = ast.get_expr(*i).compile(ast, cexpr);
-                    let icv = cexpr.instr_to_icv(instr.clone());
-                    let instr = match &icv {
-                        ICV::IConst(f) => IConst(*f),
-                        ICV::IVar(s) => IVar(s.clone()),
-                        ICV::I(i, _) => IRef(*i, false),
-                    };
-                    cexpr.local_vars.insert(*i, icv);
+                    let ii = cexpr.push(instr);
+                    let instr = IRef(ii, false);
+                    cexpr.local_vars.insert(*i, ii);
                     instr
                 }
             }
@@ -842,7 +839,6 @@ impl Compiler for Value {
                                 if let IConst(c) = instr {
                                     IConst(f(c))
                                 } else {
-                                    // IFunc_1F(f, cexpr.push(instr))
                                     IFunc_1F(f, cexpr.instr_to_icv(instr))
                                 }
                             };
@@ -896,7 +892,17 @@ impl Compiler for Value {
                             return IFunc_1S_NF(f, sarg.clone(), iargs);
                         }
                     }
-                    _ => (),
+                    (_, _, args) => {
+                        if let Some(f) = builtins::func_ns_nf(name) {
+                            let mut iargs = Vec::<ICV>::with_capacity(args.len());
+                            for i in args {
+                                let instr = ast.get_expr(*i).compile(ast, cexpr);
+                                iargs.push(cexpr.instr_to_icv(instr));
+                            }
+
+                            return IFunc_NS_NF(f, sargs.clone(), iargs);
+                        }
+                    }
                 }
 
                 let mut iargs = Vec::<ICV>::with_capacity(args.len());

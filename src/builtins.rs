@@ -101,7 +101,12 @@ pub(crate) fn func_1s_nf<F: Float>(name: &str) -> Option<fn(&str, &[F]) -> F> {
         _ => None,
     }
 }
-
+#[inline(always)]
+pub(crate) fn func_ns_nf<F: Float>(name: &str) -> Option<fn(&[&str], &[F]) -> F> {
+    match name {
+        _ => None,
+    }
+}
 #[inline(always)]
 pub fn round_to<F: Float>(x: F, n: F) -> F {
     let n = F::powf(10_f32.into(), n);

@@ -316,6 +316,7 @@ impl Ast {
         }
 
         let first = self.read_value(bs, depth)?;
+
         if let EAssignOp(varname, aop) = &first {
             if !expect_eof {
                 return Err(Error::InvalidSyntax(aop.to_string()));
