@@ -27,7 +27,8 @@
 use crate::builtins;
 use crate::builtins::{float_eq, float_ne};
 use crate::error::Error;
-
+use crate::module::*;
+use std::cell::UnsafeCell;
 // pub use crate::parser::I;
 use crate::parser::{
     Ast,
@@ -35,8 +36,10 @@ use crate::parser::{
     Expr, ExprPair,
     UnaryOp::{self, *},
     Value::{self, *},
+    I,
 };
 use crate::write_indexed_list;
+use std::collections::{BTreeMap, BTreeSet};
 use std::fmt::{self, Debug};
 use std::mem;
 
@@ -51,9 +54,9 @@ pub fn compile(ast: &Ast, cexpr: &mut CExpr) {
 }
 
 /// This enumeration boosts performance because it eliminates expensive function calls and redirection for constant values and vars.
-#[derive(PartialEq)]
+#[derive(PartialEq, Clone)]
 pub enum ICV {
-    I(usize),
+    I(usize, bool), // bool for caching enable/disable
     IConst(f64),
     IVar(String),
 }
@@ -61,7 +64,13 @@ pub enum ICV {
 impl Debug for ICV {
     fn fmt(&self, f: &mut fmt::Formatter) -> Result<(), fmt::Error> {
         match self {
-            ICV::I(i) => write!(f, ":{:?}", i),
+            ICV::I(i, cache) => {
+                if *cache {
+                    write!(f, ":&{:?}", i)
+                } else {
+                    write!(f, ":{:?}", i)
+                }
+            }
             ICV::IConst(v) => write!(f, "IConst({:?})", v),
             ICV::IVar(s) => write!(f, "IVar({:?})", s),
         }
@@ -71,35 +80,37 @@ impl Debug for ICV {
 impl From<usize> for ICV {
     #[inline(always)]
     fn from(value: usize) -> Self {
-        ICV::I(value)
+        ICV::I(value, false)
     }
 }
 
 /// `CExpr` is where `compile()` results are stored.
 pub struct CExpr {
     pub(crate) instrs: Vec<Instruction>,
+    local_vars: BTreeMap<I, ICV>,
+    pub(crate) cache: UnsafeCell<BTreeMap<usize, f64>>,
 }
 
 impl CExpr {
-    /// Creates a new default-sized `Ast`.
     #[inline]
     pub fn new() -> Self {
         Self::with_capacity(32)
     }
 
-    /// Creates a new `Ast` with the given capacity.
     #[inline]
     pub fn with_capacity(cap: usize) -> Self {
         Self {
             instrs: Vec::with_capacity(cap),
+            local_vars: BTreeMap::new(),
+            cache: UnsafeCell::new(BTreeMap::new()),
         }
     }
 
-    /// Creates a new `Ast` with the given capacity.
     #[inline]
     pub fn compile(&mut self, ast: &Ast) {
         self.clear();
-        let expr = ast.0.last().unwrap();
+
+        let expr = ast.exprs.last().unwrap();
         let instr = expr.compile(ast, self);
 
         self.instrs.push(instr);
@@ -150,6 +161,8 @@ impl CExpr {
     #[inline(always)]
     pub fn clear(&mut self) {
         self.instrs.clear();
+        self.local_vars.clear();
+        self.cache.get_mut().clear();
     }
 
     #[inline(always)]
@@ -157,6 +170,7 @@ impl CExpr {
         match instr {
             IConst(c) => ICV::IConst(c),
             IVar(s) => ICV::IVar(s),
+            IRef(i, c) => ICV::I(i, c),
             _ => ICV::from(self.push(instr)),
         }
     }
@@ -173,10 +187,12 @@ impl Debug for CExpr {
 
 /// An `Instruction` is an optimized Ast node resulting from compilation.
 #[allow(non_camel_case_types)]
-#[derive(Debug, PartialEq)]
+#[derive(Debug, PartialEq, Clone)]
 pub enum Instruction {
     //---- Primitive Value Types:
     IConst(f64),
+    IVar(String),
+    IRef(usize, bool),
 
     //---- Unary Ops:
     // Parentheses is a noop
@@ -207,12 +223,11 @@ pub enum Instruction {
     IAnd(ICV, ICV),
 
     //---- Callables:
-    IVar(String),
     IFunc(String, Vec<String>, Vec<ICV>),
     IFunc_1F(fn(f64) -> f64, ICV),
     IFunc_2F(fn(f64, f64) -> f64, ICV, ICV),
     IFunc_3F(fn(f64, f64, f64) -> f64, ICV, ICV, ICV),
-    IFunc_1S_NF(fn(&str, Vec<f64>) -> f64, String, Vec<ICV>),
+    IFunc_1S_NF(fn(&str, &[f64]) -> f64, String, Vec<ICV>),
 
     IMin(ICV, ICV),
     IMax(ICV, ICV),
@@ -315,13 +330,13 @@ impl CExpr {
     }
 
     // Can't inline recursive functions:
-    fn push_mul_leaves(&mut self, instrs: &mut Vec<Instruction>, li: ICV, ric: ICV) {
+    fn push_mul_leaves(&mut self, instrs: &mut Vec<Instruction>, licv: ICV, ricv: ICV) {
         // Take 'r' before 'l' for a chance for more efficient memory usage:
-        match ric {
-            ICV::I(_) => {
+        match ricv {
+            ICV::I(..) => {
                 let instr = self.pop();
-                if let IMul(rli, rric) = instr {
-                    self.push_mul_leaves(instrs, rli, rric);
+                if let IMul(l, r) = instr {
+                    self.push_mul_leaves(instrs, l, r);
                 } else {
                     instrs.push(instr);
                 }
@@ -330,21 +345,27 @@ impl CExpr {
             ICV::IVar(c) => instrs.push(IVar(c)),
         };
 
-        let instr = self.pop();
-        if let IMul(lli, lric) = instr {
-            self.push_mul_leaves(instrs, lli, lric);
-        } else {
-            instrs.push(instr);
-        }
+        match licv {
+            ICV::I(..) => {
+                let instr = self.pop();
+                if let IMul(l, r) = instr {
+                    self.push_mul_leaves(instrs, l, r);
+                } else {
+                    instrs.push(instr);
+                }
+            }
+            ICV::IConst(c) => instrs.push(IConst(c)),
+            ICV::IVar(c) => instrs.push(IVar(c)),
+        };
     }
     // Can't inline recursive functions:
-    fn push_add_leaves(&mut self, instrs: &mut Vec<Instruction>, li: ICV, ric: ICV) {
+    fn push_add_leaves(&mut self, instrs: &mut Vec<Instruction>, licv: ICV, ricv: ICV) {
         // Take 'r' before 'l' for a chance for more efficient memory usage:
-        match ric {
-            ICV::I(_) => {
+        match ricv {
+            ICV::I(..) => {
                 let instr = self.pop();
-                if let IAdd(rli, rric) = instr {
-                    self.push_add_leaves(instrs, rli, rric);
+                if let IAdd(l, r) = instr {
+                    self.push_add_leaves(instrs, l, r);
                 } else {
                     instrs.push(instr);
                 }
@@ -353,12 +374,18 @@ impl CExpr {
             ICV::IVar(c) => instrs.push(IVar(c)),
         };
 
-        let instr = self.pop();
-        if let IAdd(lli, lric) = instr {
-            self.push_add_leaves(instrs, lli, lric);
-        } else {
-            instrs.push(instr);
-        }
+        match licv {
+            ICV::I(..) => {
+                let instr = self.pop();
+                if let IAdd(l, r) = instr {
+                    self.push_add_leaves(instrs, l, r);
+                } else {
+                    instrs.push(instr);
+                }
+            }
+            ICV::IConst(c) => instrs.push(IConst(c)),
+            ICV::IVar(c) => instrs.push(IVar(c)),
+        };
     }
 }
 
@@ -505,6 +532,7 @@ impl Compiler for ExprSlice<'_> {
                 }
                 out
             }
+
             EAnd => {
                 let mut xss = Vec::<ExprSlice>::with_capacity(4);
                 self.split(EAnd, &mut xss);
@@ -531,14 +559,15 @@ impl Compiler for ExprSlice<'_> {
                 }
                 out
             }
+
             EAdd => {
                 let mut xss = Vec::<ExprSlice>::with_capacity(4);
                 self.split(EAdd, &mut xss);
                 let mut instrs = Vec::<Instruction>::with_capacity(xss.len());
                 for xs in xss {
                     let instr = xs.compile(ast, cexpr);
-                    if let IAdd(li, ric) = instr {
-                        cexpr.push_add_leaves(&mut instrs, li, ric); // Flatten nested structures like "x - 1 + 2 - 3".
+                    if let IAdd(licv, ricv) = instr {
+                        cexpr.push_add_leaves(&mut instrs, licv, ricv); // Flatten nested structures like "x - 1 + 2 - 3".
                     } else {
                         instrs.push(instr);
                     }
@@ -567,8 +596,8 @@ impl Compiler for ExprSlice<'_> {
                 let mut instrs = Vec::<Instruction>::with_capacity(xss.len());
                 for xs in xss {
                     let instr = xs.compile(ast, cexpr);
-                    if let IMul(li, ric) = instr {
-                        cexpr.push_mul_leaves(&mut instrs, li, ric); // Flatten nested structures like "deg/360 * 2*pi()".
+                    if let IMul(licv, ricv) = instr {
+                        cexpr.push_mul_leaves(&mut instrs, licv, ricv); // Flatten nested structures like "deg/360 * 2*pi()".
                     } else {
                         instrs.push(instr);
                     }
@@ -633,6 +662,7 @@ impl Compiler for ExprSlice<'_> {
                 }
                 out
             }
+
             _ => unreachable!(),
         }
     }
@@ -675,6 +705,26 @@ impl Compiler for Value {
         match self {
             EConst(c) => IConst(*c),
             EUnaryOp(u) => u.compile(ast, cexpr),
+
+            ERef(i) => {
+                if let Some(icv) = cexpr.local_vars.get(i) {
+                    match icv {
+                        ICV::IConst(f) => IConst(*f),
+                        ICV::IVar(s) => IVar(s.clone()),
+                        ICV::I(i, _) => IRef(*i, true),
+                    }
+                } else {
+                    let instr = ast.get_expr(*i).compile(ast, cexpr);
+                    let icv = cexpr.instr_to_icv(instr.clone());
+                    let instr = match &icv {
+                        ICV::IConst(f) => IConst(*f),
+                        ICV::IVar(s) => IVar(s.clone()),
+                        ICV::I(i, _) => IRef(*i, false),
+                    };
+                    cexpr.local_vars.insert(*i, icv);
+                    instr
+                }
+            }
 
             EVar(name) => {
                 if let Some(c) = builtins::constant(name) {
@@ -856,6 +906,7 @@ impl Compiler for Value {
                 }
                 IFunc(name.clone(), sargs.clone(), iargs)
             }
+            _ => unreachable!(),
         }
     }
 }

@@ -14,25 +14,24 @@
 //!
 //! VarName: [a-zA-Z_][a-zA-Z_0-9]*
 //!
-//! StdFunc: VarName((Expr,)*)?  ||  VarName[(Expr,)*]?
+//! Func: VarName((String)*, (Expr,)*)?  ||  VarName[(Expr,)*]?
 //!
 //! PrintFunc: print(ExprOrString,*)
-//!
-//! ExprOrString: Expr || String
 //!
 //! String: ".*"
 //! ```
 
 use crate::error::Error;
 use crate::write_indexed_list;
-use std::fmt::{self, Debug};
+use std::collections::BTreeMap;
+use std::fmt::{self, Debug, Display};
 use std::ops::Deref;
 use std::str::{from_utf8, from_utf8_unchecked};
 
 pub const DEFAULT_EXPR_LEN_LIMIT: usize = 1024 * 10;
 pub const DEFAULT_EXPR_DEPTH_LIMIT: usize = 32;
 
-#[derive(Copy, Clone, PartialEq, Eq)]
+#[derive(Copy, Clone, PartialEq, Eq, PartialOrd, Ord)]
 pub struct I(pub usize);
 
 impl Debug for I {
@@ -81,7 +80,10 @@ impl<S: AsRef<str>> ParseExpr for S {
     }
 }
 
-pub struct Ast(pub(crate) Vec<Expr>);
+pub struct Ast {
+    pub(crate) exprs: Vec<Expr>,
+    local_vars: BTreeMap<String, I>,
+}
 
 impl Ast {
     /// Creates a new default-sized `Ast`.
@@ -93,7 +95,10 @@ impl Ast {
     /// Creates a new `Ast` with the given capacity.
     #[inline]
     pub fn with_capacity(cap: usize) -> Self {
-        Self(Vec::with_capacity(cap))
+        Self {
+            exprs: Vec::with_capacity(cap),
+            local_vars: BTreeMap::new(),
+        }
     }
 
     #[inline]
@@ -111,27 +116,35 @@ impl Ast {
             return Err(Error::TooLong);
         } // Restrict length for safety
         let mut bs = expr_str.as_bytes();
-        self.read_expr(&mut bs, 0, true).map(|_| ())
+        loop {
+            self.read_expr(&mut bs, 0, true).map(|_| ())?;
+            if bs.is_empty() {
+                break;
+            }
+            skip(&mut bs);
+        }
+        Ok(())
     }
 
     /// Clears all data from [`Ast`](struct.ParseAST.html) and [`Ast`](struct.CompileAST.html).
     #[inline(always)]
     pub fn clear(&mut self) {
-        self.0.clear();
+        self.exprs.clear();
+        self.local_vars.clear();
     }
 
     /// Returns a reference to the [`Expr`](../parser/struct.Expr.html)
-    /// located at `expr_i` within the `Ast.0'.
+    /// located at `expr_i` within the `Ast.exprs'.
     ///
     #[inline(always)]
     pub fn get_expr(&self, expr_i: I) -> &Expr {
         // I'm using this non-panic match structure to boost performance:
-        self.0.get(expr_i.0).unwrap()
+        self.exprs.get(expr_i.0).unwrap()
     }
 
     #[inline(always)]
     pub fn last(&self) -> Option<&Expr> {
-        self.0.last()
+        self.exprs.last()
     }
 
     /// Returns a reference to the [`Value`](../parser/enum.Value.html)
@@ -140,32 +153,32 @@ impl Ast {
     #[inline(always)]
     pub fn get_val(&self, val_i: I) -> &Value {
         // self.vals.get(val_i).unwrap()
-        &self.0.get(val_i.0).unwrap().0
+        &self.exprs.get(val_i.0).unwrap().0
     }
 
     /// Appends an `Expr` to `Ast.0`.
     ///
     #[inline(always)]
-    pub fn push_expr(&mut self, expr: Expr) -> Result<I, Error> {
-        let i = self.0.len();
+    pub fn push_expr(&mut self, expr: Expr) -> I {
+        let i = self.exprs.len();
 
-        self.0.push(expr);
-        Ok(i.into())
+        self.exprs.push(expr);
+        i.into()
     }
 
     #[inline(always)]
-    pub fn push_val(&mut self, val: Value) -> Result<I, Error> {
-        let i = self.0.len();
+    pub fn push_val(&mut self, val: Value) -> I {
+        let i = self.exprs.len();
 
-        self.0.push(Expr(val, vec![]));
-        Ok(i.into())
+        self.exprs.push(Expr(val, vec![]));
+        i.into()
     }
 }
 
 impl Debug for Ast {
     fn fmt(&self, f: &mut fmt::Formatter) -> Result<(), fmt::Error> {
         write!(f, "Ast[")?;
-        write_indexed_list(f, &self.0)?;
+        write_indexed_list(f, &self.exprs)?;
         write!(f, "]")?;
         Ok(())
     }
@@ -193,18 +206,38 @@ impl Debug for Expr {
 }
 
 /// A `Value` can be a Constant, a UnaryOp, a StdFunc, or a PrintFunc.
-#[derive(Debug, PartialEq)]
+#[derive(PartialEq)]
 pub enum Value {
     EConst(f64),
     EUnaryOp(UnaryOp),
     EVar(String),
+    ERef(I),
+    EAssignOp(String, AssignOp),
     EFunc {
         name: String,
         sargs: Vec<String>, // cap=2
         args: Vec<I>,       // cap=4
     },
+    // Pass,
 }
 use Value::*;
+
+impl Debug for Value {
+    fn fmt(&self, f: &mut fmt::Formatter) -> Result<(), fmt::Error> {
+        match self {
+            EConst(v) => write!(f, "EConst({:?})", v),
+            EUnaryOp(uop) => write!(f, "{:?}", uop),
+            EVar(s) => write!(f, "EVar({:?})", s),
+            ERef(i) => write!(f, "ERef({:?})", i),
+            EFunc {
+                name,
+                sargs, // cap=2
+                args,  // cap=4
+            } => write!(f, "EFunc({:?}, {:?}, {:?})", name, sargs, args),
+            _ => Ok(()),
+        }
+    }
+}
 
 /// Unary Operators
 #[derive(Debug, PartialEq)]
@@ -221,6 +254,7 @@ use UnaryOp::*;
 pub enum BinaryOp {
     // Sorted in order of precedence (low-priority to high-priority):
     // Keep this order in-sync with evaler.rs.  (Search for 'rtol' and 'ltor'.)
+    // ESemi = 0,
     EOr = 1, // Lowest Priority
     EAnd = 2,
     ENE = 3,
@@ -238,6 +272,42 @@ pub enum BinaryOp {
 }
 use BinaryOp::*;
 
+#[derive(Debug, PartialEq, PartialOrd, Copy, Clone)]
+pub enum AssignOp {
+    // Sorted in order of precedence (low-priority to high-priority):
+    // Keep this order in-sync with evaler.rs.  (Search for 'rtol' and 'ltor'.)
+    EAssign,
+    EAddAssign,
+    ESubAssign,
+    EMulAssign,
+    EDivAssign,
+    EModAssign,
+    EExpAssign,
+}
+
+impl Display for AssignOp {
+    fn fmt(&self, f: &mut fmt::Formatter) -> Result<(), fmt::Error> {
+        match self {
+            EAssign => write!(f, "="),
+            EAddAssign => write!(f, "+="),
+            ESubAssign => write!(f, "-="),
+            EMulAssign => write!(f, "*="),
+            EDivAssign => write!(f, "/="),
+            EModAssign => write!(f, "%="),
+            EExpAssign => write!(f, "^="),
+        }
+    }
+}
+use AssignOp::*;
+
+/// Used by the `print()` function.  Can hold an `Expression` or a `String`.
+#[derive(Debug, PartialEq)]
+pub enum ExprOrString {
+    EExpr(I),
+    EStr(String), // cap=64
+}
+use ExprOrString::{EExpr, EStr};
+
 impl Ast {
     #[inline(always)]
     fn read_expr(&mut self, bs: &mut &[u8], depth: usize, expect_eof: bool) -> Result<I, Error> {
@@ -246,6 +316,29 @@ impl Ast {
         }
 
         let first = self.read_value(bs, depth)?;
+        if let EAssignOp(varname, aop) = &first {
+            if !expect_eof {
+                return Err(Error::InvalidSyntax(aop.to_string()));
+            }
+            let i = self.read_expr(bs, depth, false)?;
+            let e = if let Some(i) = self.local_vars.get(varname) {
+                ERef(*i)
+            } else {
+                EVar(varname.into())
+            };
+            let i = match aop {
+                EAddAssign => self.push_expr(Expr(e, vec![(EAdd, EUnaryOp(EParen(i)))])),
+                ESubAssign => self.push_expr(Expr(e, vec![(ESub, EUnaryOp(EParen(i)))])),
+                EMulAssign => self.push_expr(Expr(e, vec![(EMul, EUnaryOp(EParen(i)))])),
+                EDivAssign => self.push_expr(Expr(e, vec![(EDiv, EUnaryOp(EParen(i)))])),
+                EModAssign => self.push_expr(Expr(e, vec![(EMod, EUnaryOp(EParen(i)))])),
+                EExpAssign => self.push_expr(Expr(e, vec![(EExp, EUnaryOp(EParen(i)))])),
+                _ => i,
+            };
+
+            self.local_vars.insert(varname.clone(), i);
+            return Ok(0.into());
+        }
 
         let mut pairs = Vec::<ExprPair>::with_capacity(8);
         loop {
@@ -257,7 +350,9 @@ impl Ast {
                 }
             }
         }
+
         spaces(bs);
+
         if expect_eof && !bs.is_empty() {
             let bs_str = match from_utf8(bs) {
                 Ok(s) => s,
@@ -265,7 +360,18 @@ impl Ast {
             };
             return Err(Error::UnparsedTokensRemaining(bs_str.to_string()));
         }
-        Ok(self.push_expr(Expr(first, pairs))?)
+        let i = self.push_expr(Expr(first, pairs));
+
+        Ok(i)
+    }
+
+    #[inline(always)]
+    fn read_expr_or_string(&mut self, bs: &mut &[u8], depth: usize) -> Result<ExprOrString, Error> {
+        if let Some(s) = read_string(bs)? {
+            Ok(EStr(s))
+        } else {
+            Ok(EExpr(self.read_expr(bs, depth + 1, false)?))
+        }
     }
 
     #[inline(always)]
@@ -299,12 +405,12 @@ impl Ast {
                 b'+' => {
                     skip(bs);
                     let v = self.read_value(bs, depth + 1)?;
-                    Ok(Some(EPos(self.push_val(v)?)))
+                    Ok(Some(EPos(self.push_val(v))))
                 }
                 b'-' => {
                     skip(bs);
                     let v = self.read_value(bs, depth + 1)?;
-                    Ok(Some(ENeg(self.push_val(v)?)))
+                    Ok(Some(ENeg(self.push_val(v))))
                 }
                 b'(' => {
                     skip(bs);
@@ -327,7 +433,7 @@ impl Ast {
                 b'!' => {
                     skip(bs);
                     let v = self.read_value(bs, depth + 1)?;
-                    Ok(Some(ENot(self.push_val(v)?)))
+                    Ok(Some(ENot(self.push_val(v))))
                 }
                 _ => Ok(None),
             },
@@ -339,12 +445,14 @@ impl Ast {
         match read_varname(bs)? {
             None => Ok(None),
             Some(varname) => {
-                match read_open_parenthesis(bs)? {
-                    None => Ok(Some(EVar(varname))),
-                    Some(open_parenth) => {
-                        // VarNames with Parenthesis are first matched against builtins, then custom.
-                        Ok(Some(self.read_func(varname, bs, depth, open_parenth)?))
-                    }
+                if let Some(open_parenth) = read_open_parenthesis(bs)? {
+                    Ok(Some(self.read_func(varname, bs, depth, open_parenth)?))
+                } else if let Some(aop) = read_assignop(bs)? {
+                    Ok(Some(EAssignOp(varname, aop)))
+                } else if let Some(i) = self.local_vars.get(&varname) {
+                    Ok(Some(ERef(*i)))
+                } else {
+                    Ok(Some(EVar(varname)))
                 }
             }
         }
@@ -385,7 +493,7 @@ impl Ast {
             } else {
                 if let Some(s) = read_string(bs)? {
                     sargs.push(s);
-                    println!("{:?}", sargs);
+
                     match read(bs) {
                         Some(b',') => {}
                         _ => {
@@ -500,26 +608,10 @@ fn read_const(bs: &mut &[u8]) -> Result<Option<f64>, Error> {
 }
 
 #[inline(always)]
-fn is_varname_byte(b: u8, i: usize) -> bool {
-    (b'A' <= b && b <= b'Z')
-        || (b'a' <= b && b <= b'z')
-        || b == b'_'
-        || (i > 0 && (b'0' <= b && b <= b'9'))
-}
-
-#[inline(always)]
-fn is_varname_byte_opt(bo: Option<u8>, i: usize) -> bool {
-    match bo {
-        Some(b) => is_varname_byte(b, i),
-        None => false,
-    }
-}
-
-#[inline(always)]
 fn read_binaryop(bs: &mut &[u8]) -> Result<Option<BinaryOp>, Error> {
     spaces(bs);
     match peek(bs) {
-        None => Ok(None), // Err(KErr::new("EOF")), -- EOF is usually OK in a BinaryOp position.
+        None => Ok(None),
         Some(b) => match b {
             b'+' => {
                 skip(bs);
@@ -579,6 +671,27 @@ fn read_binaryop(bs: &mut &[u8]) -> Result<Option<BinaryOp>, Error> {
             b'&' if peek_is(bs, 1, b'&') => {
                 skip_n(bs, 2);
                 Ok(Some(EAnd))
+            }
+            b';' | b')' | b',' => Ok(None),
+            _ => Err(Error::InvalidSyntax(format!("{}", b as char))),
+        },
+    }
+}
+
+#[inline(always)]
+fn read_assignop(bs: &mut &[u8]) -> Result<Option<AssignOp>, Error> {
+    spaces(bs);
+    match peek(bs) {
+        None => Ok(None), // Err(KErr::new("EOF")), -- EOF is usually OK in a BinaryOp position.
+        Some(b) => match b {
+            b'=' if !peek_is(bs, 1, b'=') => {
+                skip(bs);
+                Ok(Some(EAssign))
+            }
+
+            b'+' if peek_is(bs, 1, b'=') => {
+                skip_n(bs, 2);
+                Ok(Some(EAddAssign))
             }
             _ => Ok(None),
         },
@@ -645,11 +758,28 @@ fn read_string(bs: &mut &[u8]) -> Result<Option<String>, Error> {
 
     let out =
         from_utf8(&bs[..toklen]).map_err(|_| Error::Utf8ErrorWhileParsing("string".to_string()))?;
+
     skip_n(bs, toklen);
     match read(bs) {
         None => Err(Error::EofWhileParsing("string".to_string())),
         Some(b'"') => Ok(Some(out.to_string())),
         Some(_) => Err(Error::Unreachable),
+    }
+}
+
+#[inline(always)]
+fn is_varname_byte(b: u8, i: usize) -> bool {
+    (b'A' <= b && b <= b'Z')
+        || (b'a' <= b && b <= b'z')
+        || b == b'_'
+        || (i > 0 && (b'0' <= b && b <= b'9'))
+}
+
+#[inline(always)]
+fn is_varname_byte_opt(bo: Option<u8>, i: usize) -> bool {
+    match bo {
+        Some(b) => is_varname_byte(b, i),
+        None => false,
     }
 }
 

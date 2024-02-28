@@ -58,6 +58,9 @@ pub enum Error {
     /// A value was expected, but invalid input data was found.
     InvalidValue,
 
+    /// A value was expected, but invalid input data was found.
+    InvalidSyntax(String),
+
     /// An error occurred during the parsing of a f64 number.
     ///
     /// The `String` field contains the data that caused the error.

@@ -2,7 +2,7 @@ use dyn_fmt;
 use num_traits::{self, FloatConst};
 use std::fmt::{Debug, Display};
 
-pub trait Float: num_traits::Float + From<f32> {}
+pub trait Float: num_traits::Float + From<f32> + Display + FloatConst {}
 impl Float for f32 {}
 impl Float for f64 {}
 
@@ -92,11 +92,11 @@ pub(crate) fn func_5f<F: Float>(name: &str) -> Option<fn(F, F, F, F, F) -> F> {
 }
 
 #[inline(always)]
-pub(crate) fn func_1s_nf<F: Float + Display>(name: &str) -> Option<fn(&str, Vec<F>) -> F> {
+pub(crate) fn func_1s_nf<F: Float>(name: &str) -> Option<fn(&str, &[F]) -> F> {
     match name {
-        "print" => Some(|s, v: Vec<F>| {
-            eprintln!("{}", dyn_fmt::Arguments::new(s, &v));
-            *v.last().unwrap()
+        "print" => Some(|s, v: &[F]| {
+            eprintln!("{}", dyn_fmt::Arguments::new(s, v));
+            *v.last().unwrap_or(&F::nan())
         }),
         _ => None,
     }

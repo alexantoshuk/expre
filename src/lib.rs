@@ -110,10 +110,10 @@
 //! // This lets us use the `?` operator inside of `main()`.  Very convenient!
 //! fn main() -> Result<(), expre::Error> {
 //!     // This example doesn't use any variables, so just use an EmptyNamespace:
-//!     let mut ns = expre::EmptyNamespace;
+//!     let mut ctx = expre::EmptyNamespace;
 //!
 //!     let val = expre::eval(
-//!         "1+2*3/4^5%6 + log(100K) + log(e(),100) + [3*(3-3)/3] + (2<3) && 1.23",    &mut ns)?;
+//!         "1+2*3/4^5%6 + log(100K) + log(e(),100) + [3*(3-3)/3] + (2<3) && 1.23",    &mut ctx)?;
 //!     //    |            |      |    |   |          |               |   |
 //!     //    |            |      |    |   |          |               |   boolean logic with short-circuit support
 //!     //    |            |      |    |   |          |               comparisons
@@ -469,19 +469,17 @@
 //! on my blog.
 
 //#![warn(missing_docs)]
-
 pub mod builtins;
 pub mod compiler;
+pub mod context;
 pub mod error;
 pub mod evaler;
-pub mod evalns;
+pub mod module;
 pub mod parser;
-#[cfg(feature = "unsafe-vars")]
-pub use self::compiler::Instruction::IUnsafeVar;
 pub use self::compiler::*;
+pub use self::context::*;
 pub use self::error::Error;
 pub use self::evaler::*;
-pub use self::evalns::*;
 
 pub use self::parser::{parse, Ast, ParseExpr};
 use std::fmt;
@@ -522,17 +520,17 @@ where
 /// # Examples
 ///
 /// [See the `expre` top-level documentation for examples.](../index.html#easy-evaluation)
-pub fn eval(expr_str: &str, ns: &impl EvalNamespace) -> Result<f64, Error> {
-    CExpr::from_str(expr_str)?.eval(ns)
+pub fn eval(expr_str: &str, ctx: &impl Context) -> Result<f64, Error> {
+    CExpr::from_str(expr_str)?.eval(ctx)
 }
 
 pub fn eval2(
     expr_str: &str,
     ast: &mut Ast,
     cexpr: &mut CExpr,
-    ns: &impl EvalNamespace,
+    ctx: &impl Context,
 ) -> Result<f64, Error> {
     expr_str.parse_expr(ast)?;
     ast.compile(cexpr);
-    cexpr.eval(ns)
+    cexpr.eval(ctx)
 }
