@@ -469,7 +469,6 @@
 //! on my blog.
 
 //#![warn(missing_docs)]
-pub mod builtins;
 pub mod compiler;
 pub mod context;
 pub mod error;
@@ -534,3 +533,8 @@ pub fn eval2(
     ast.compile(cexpr);
     cexpr.eval(ctx)
 }
+
+// wxpre::parse(&exprstr).compile(&bulitins).eval(&env)
+// let cexpr = expre::compile(expr_str)?;
+// let cexpr = expre::compile_with(expr_str, &my_module)?;
+// let result = cexpr.eval(&ctx)?;

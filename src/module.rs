@@ -107,9 +107,9 @@ impl<F: Float> Module<F> for Builtins {
             "PI" => Some(F::PI()),
             "E" => Some(F::E()),
             "EPS" => Some(F::epsilon()),
-            "NAN" => Some(F::nan()),
-            "INF" => Some(F::infinity()),
-            "NEG_INF" => Some(F::neg_infinity()),
+            // "NAN" => Some(F::nan()),
+            // "INF" => Some(F::infinity()),
+            // "NEG_INF" => Some(F::neg_infinity()),
             _ => None,
         }
     }
@@ -194,8 +194,8 @@ impl<F: Float> Module<F> for Builtins {
     }
 }
 
-pub struct UserCtxExample {}
-impl<F: Float> Module<F> for UserCtxExample {
+pub struct UserModuleExample {}
+impl<F: Float> Module<F> for UserModuleExample {
     /// Get the const associated with the given `name`
     #[inline(always)]
     fn constant(name: &str) -> Option<F> {

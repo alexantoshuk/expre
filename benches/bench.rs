@@ -30,9 +30,9 @@ fn criterion_benchmark(c: &mut Criterion) {
     c.bench_function("eval map", |b| b.iter(|| cexpr.eval(&mapctx)));
     c.bench_function("eval match", |b| b.iter(|| cexpr.eval(&ctx)));
 
-    c.bench_function("parse -> compile -> eval", |b| {
-        b.iter(|| expre::eval2(expr_str, &mut ast, &mut cexpr, &ctx))
-    });
+    // c.bench_function("parse -> compile -> eval", |b| {
+    //     b.iter(|| expre::eval2(expr_str, &mut ast, &mut cexpr, &ctx))
+    // });
 }
 
 criterion_group!(benches, criterion_benchmark);

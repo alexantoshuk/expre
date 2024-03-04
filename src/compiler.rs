@@ -24,8 +24,6 @@
 //! * Variable-length `Expr`/`Value` Ast nodes are converted into constant-sized `Instruction` nodes.
 //! * The `ICV` enumeration helps to eliminate expensive function calls.
 
-use crate::builtins;
-use crate::builtins::{float_eq, float_ne};
 use crate::error::Error;
 use crate::module::*;
 use std::cell::UnsafeCell;
@@ -256,7 +254,7 @@ impl CExpr {
     #[inline(always)]
     fn not_wrap(&mut self, instr: Instruction) -> Instruction {
         match instr {
-            IConst(c) => IConst((float_eq(c, 0.0)).into()),
+            IConst(c) => IConst((Float::float_eq(c, 0.0)).into()),
             INot(_) => self.pop(),
             _ => INot(self.instr_to_icv(instr)),
         }
@@ -290,7 +288,7 @@ impl CExpr {
                 }
             }
         }
-        if float_ne(const_prod, 1.0) {
+        if Float::float_ne(const_prod, 1.0) {
             if out_set {
                 out = IMul(self.instr_to_icv(out), ICV::IConst(const_prod));
             } else {
@@ -320,7 +318,7 @@ impl CExpr {
                 }
             }
         }
-        if float_ne(const_sum, 0.0) {
+        if Float::float_ne(const_sum, 0.0) {
             if out_set {
                 out = IAdd(self.instr_to_icv(out), ICV::IConst(const_sum));
             } else {
@@ -486,8 +484,8 @@ impl Compiler for ExprSlice<'_> {
                 if let IConst(l) = out {
                     if let IConst(r) = instr {
                         out = match op {
-                            EEQ => IConst((float_eq(l, r)).into()),
-                            ENE => IConst((float_ne(l, r)).into()),
+                            EEQ => IConst((Float::float_eq(l, r)).into()),
+                            ENE => IConst((Float::float_ne(l, r)).into()),
                             ELT => IConst((l < r).into()),
                             EGT => IConst((l > r).into()),
                             ELTE => IConst((l <= r).into()),
@@ -523,7 +521,7 @@ impl Compiler for ExprSlice<'_> {
                         out = IOr(cexpr.instr_to_icv(out), cexpr.instr_to_icv(instr));
                     } else {
                         if let IConst(c) = instr {
-                            if float_ne(c, 0.0) {
+                            if Float::float_ne(c, 0.0) {
                                 return instr;
                             }
                             // out = instr;     // Skip this 0 value (mostly so I don't complicate my logic in 'if out_set' since I can assume that any set value is non-const).
@@ -545,7 +543,7 @@ impl Compiler for ExprSlice<'_> {
                 for xs in xss.iter() {
                     let instr = xs.compile(ast, cexpr);
                     if let IConst(c) = instr {
-                        if float_eq(c, 0.0) {
+                        if Float::float_eq(c, 0.0) {
                             return instr;
                         }
                     }
@@ -695,7 +693,7 @@ impl Compiler for UnaryOp {
             ENot(i) => {
                 let instr = ast.get_val(*i).compile(ast, cexpr);
                 if let IConst(c) = instr {
-                    IConst((float_eq(c, 0.0)).into())
+                    IConst((Float::float_eq(c, 0.0)).into())
                 } else {
                     cexpr.not_wrap(instr)
                 }
@@ -724,7 +722,7 @@ impl Compiler for Value {
             }
 
             EVar(name) => {
-                if let Some(c) = builtins::constant(name) {
+                if let Some(c) = Builtins::constant(name) {
                     IConst(c)
                 } else {
                     IVar(name.clone())
@@ -833,7 +831,7 @@ impl Compiler for Value {
                         return out;
                     }
                     (_, [], [arg]) => {
-                        if let Some(f) = builtins::func_1f(name) {
+                        if let Some(f) = Builtins::func_1f(name) {
                             let instr = ast.get_expr(*arg).compile(ast, cexpr);
                             return {
                                 if let IConst(c) = instr {
@@ -845,7 +843,7 @@ impl Compiler for Value {
                         }
                     }
                     (_, [], [arg0, arg1]) => {
-                        if let Some(f) = builtins::func_2f(name) {
+                        if let Some(f) = Builtins::func_2f(name) {
                             let instr0 = ast.get_expr(*arg0).compile(ast, cexpr);
                             let instr1 = ast.get_expr(*arg1).compile(ast, cexpr);
                             return {
@@ -862,7 +860,7 @@ impl Compiler for Value {
                         }
                     }
                     (_, [], [arg0, arg1, arg2]) => {
-                        if let Some(f) = builtins::func_3f(name) {
+                        if let Some(f) = Builtins::func_3f(name) {
                             let instr0 = ast.get_expr(*arg0).compile(ast, cexpr);
                             let instr1 = ast.get_expr(*arg1).compile(ast, cexpr);
                             let instr2 = ast.get_expr(*arg2).compile(ast, cexpr);
@@ -883,7 +881,7 @@ impl Compiler for Value {
                         }
                     }
                     (_, [sarg], _) => {
-                        if let Some(f) = builtins::func_1s_nf(name) {
+                        if let Some(f) = Builtins::func_1s_nf(name) {
                             let mut iargs = Vec::<ICV>::with_capacity(args.len());
                             for i in args {
                                 let instr = ast.get_expr(*i).compile(ast, cexpr);
@@ -893,7 +891,7 @@ impl Compiler for Value {
                         }
                     }
                     (_, _, args) => {
-                        if let Some(f) = builtins::func_ns_nf(name) {
+                        if let Some(f) = Builtins::func_ns_nf(name) {
                             let mut iargs = Vec::<ICV>::with_capacity(args.len());
                             for i in args {
                                 let instr = ast.get_expr(*i).compile(ast, cexpr);

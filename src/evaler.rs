@@ -4,11 +4,11 @@
 //! `Instruction`s also have the option of using the `eval_compiled!()` macro
 //! which is much faster for common cases.
 
-use crate::builtins::{float_eq, float_ne};
 use crate::compiler::CExpr;
 use crate::compiler::{Instruction, Instruction::*, ICV};
 use crate::context::Context;
 use crate::error::Error;
+use crate::module::*;
 use std::collections::{btree_map::Entry, BTreeSet};
 use std::fmt;
 
@@ -247,21 +247,21 @@ impl Evaler for Instruction {
             }
 
             IEQ(licv, ricv) => {
-                Ok(float_eq(cexpr._eval(licv, ctx)?, cexpr._eval(ricv, ctx)?).into())
+                Ok(Float::float_eq(cexpr._eval(licv, ctx)?, cexpr._eval(ricv, ctx)?).into())
             }
             INE(licv, ricv) => {
-                Ok(float_ne(cexpr._eval(licv, ctx)?, cexpr._eval(ricv, ctx)?).into())
+                Ok(Float::float_ne(cexpr._eval(licv, ctx)?, cexpr._eval(ricv, ctx)?).into())
             }
             ILT(licv, ricv) => Ok((cexpr._eval(licv, ctx)? < cexpr._eval(ricv, ctx)?).into()),
             ILTE(licv, ricv) => Ok((cexpr._eval(licv, ctx)? <= cexpr._eval(ricv, ctx)?).into()),
             IGTE(licv, ricv) => Ok((cexpr._eval(licv, ctx)? >= cexpr._eval(ricv, ctx)?).into()),
             IGT(licv, ricv) => Ok((cexpr._eval(licv, ctx)? > cexpr._eval(ricv, ctx)?).into()),
 
-            INot(icv) => Ok(float_eq(cexpr._eval(icv, ctx)?, 0.0).into()),
+            INot(icv) => Ok(Float::float_eq(cexpr._eval(icv, ctx)?, 0.0).into()),
 
             IAnd(licv, ricv) => {
                 let l = cexpr._eval(licv, ctx)?;
-                if float_eq(l, 0.0) {
+                if Float::float_eq(l, 0.0) {
                     Ok(l)
                 } else {
                     Ok(cexpr._eval(ricv, ctx)?)
@@ -269,7 +269,7 @@ impl Evaler for Instruction {
             }
             IOr(licv, ricv) => {
                 let l = cexpr._eval(licv, ctx)?;
-                if float_ne(l, 0.0) {
+                if Float::float_ne(l, 0.0) {
                     Ok(l)
                 } else {
                     Ok(cexpr._eval(ricv, ctx)?)
