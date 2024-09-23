@@ -9,62 +9,62 @@ use crate::compiler::{Instruction, Instruction::*, ICV};
 use crate::context::Context;
 use crate::error::Error;
 use crate::module::*;
+use indexmap::*;
 use std::collections::{btree_map::Entry, BTreeSet};
 use std::fmt;
 
 impl CExpr {
-    pub fn eval(&self, ctx: &impl Context) -> Result<f64, Error> {
+    pub fn eval(&self, ctx: &[f64]) -> Result<f64, Error> {
         self.instrs.last().unwrap().eval(self, ctx)
     }
 
-    pub fn var_names(&self) -> BTreeSet<String> {
-        self.instrs.last().unwrap().var_names(self)
-    }
+    // pub fn var_names(&self) -> BTreeSet<String> {
+    //     self.instrs.last().unwrap().var_names(self)
+    // }
 
-    fn _var_names(&self, icv: &ICV, dst: &mut BTreeSet<String>) {
-        match icv {
-            ICV::I(i) => {
-                self.get(*i)._var_names(self, dst);
-            }
-            ICV::IVar(s) => {
-                dst.insert(s.clone());
-            }
-            _ => {}
-        }
-    }
+    // fn _var_names(&self, icv: &ICV, dst: &mut BTreeSet<String>) {
+    //     match icv {
+    //         ICV::I(i) => {
+    //             self.get(*i)._var_names(self, dst);
+    //         }
+    //         ICV::IVar(s) => {
+    //             dst.insert(s.clone());
+    //         }
+    //         _ => {}
+    //     }
+    // }
 
-    #[inline(always)]
-    fn _eval(&self, icv: &ICV, ctx: &impl Context) -> Result<f64, Error> {
+    #[inline]
+    fn _eval(&self, icv: &ICV, ctx: &[f64]) -> Result<f64, Error> {
         match icv {
             ICV::IConst(c) => Ok(*c),
-            ICV::IVar(name) => match ctx.lookup(name, &[]) {
-                Some(f) => Ok(f),
-                None => Err(Error::Undefined(name.to_string())),
+            ICV::IVar(i) => match ctx.get(*i) {
+                Some(f) => Ok(*f),
+                None => Err(Error::Undefined("ERROR".to_string())),
             },
             ICV::I(i) => self.get(*i).eval(self, ctx),
-            ICV::IRef(i, cache) => self._eval_ref(*i, *cache, ctx),
         }
     }
 
-    #[inline(always)]
-    fn _eval_ref(&self, i: usize, cache: bool, ctx: &impl Context) -> Result<f64, Error> {
-        if cache {
-            let entry = unsafe { &mut *self.cache.get() }.entry(i);
-            match entry {
-                Entry::Occupied(occupied) => {
-                    // println!("Get :{:?} from cache", i);
-                    Ok(*occupied.get())
-                }
-                Entry::Vacant(vacant) => {
-                    let v = self.get(i).eval(self, ctx)?;
-                    // println!("Write :{:?} to cache", i);
-                    Ok(*vacant.insert(v))
-                }
-            }
-        } else {
-            self.get(i).eval(self, ctx)
-        }
-    }
+    // #[inline]
+    // fn _eval_ref(&self, i: usize, cache: bool, ctx: &impl Context) -> Result<f64, Error> {
+    //     if cache {
+    //         let entry = unsafe { &mut *self.cache.get() }.entry(i);
+    //         match entry {
+    //             Entry::Occupied(occupied) => {
+    //                 // println!("Get :{:?} from cache", i);
+    //                 Ok(*occupied.get())
+    //             }
+    //             Entry::Vacant(vacant) => {
+    //                 let v = self.get(i).eval(self, ctx)?;
+    //                 // println!("Write :{:?} to cache", i);
+    //                 Ok(*vacant.insert(v))
+    //             }
+    //         }
+    //     } else {
+    //         self.get(i).eval(self, ctx)
+    //     }
+    // }
 }
 
 /// You must `use` this trait so you can call `.eval()`.
@@ -72,82 +72,12 @@ pub trait Evaler: fmt::Debug {
     /// Evaluate this `Expr`/`Instruction` and return an `f64`.
     ///
     /// Returns a `fasteval::Error` if there are any problems, such as undefined variables.
-    fn eval(&self, cexpr: &CExpr, ctx: &impl Context) -> Result<f64, Error>;
-
-    /// Don't call this directly.  Use `var_names()` instead.
-    ///
-    /// This exists because of ternary short-circuits; they prevent us from
-    /// getting a complete list of vars just by doing eval() with a clever
-    /// callback.
-    fn _var_names(&self, cexpr: &CExpr, dst: &mut BTreeSet<String>);
-
-    /// Returns a list of variables and custom functions that are used by this `Expr`/`Instruction`.
-    #[inline(always)]
-    fn var_names(&self, cexpr: &CExpr) -> BTreeSet<String> {
-        let mut set = BTreeSet::new();
-        self._var_names(cexpr, &mut set);
-        set
-    }
+    fn eval(&self, cexpr: &CExpr, ctx: &[f64]) -> Result<f64, Error>;
 }
 
 impl Evaler for Instruction {
-    #[inline(always)]
-    fn _var_names(&self, cexpr: &CExpr, dst: &mut BTreeSet<String>) {
-        match self {
-            IVar(s) => {
-                dst.insert(s.clone());
-            }
-
-            IFunc(name, _, nicv) => {
-                dst.insert(name.clone());
-                for icv in nicv {
-                    cexpr._var_names(icv, dst);
-                }
-            }
-
-            INeg(icv) | INot(icv) | IInv(icv) | IFunc_1F(_, icv) => {
-                cexpr._var_names(icv, dst);
-            }
-
-            IFunc_2F(_, icv0, icv1) => {
-                cexpr._var_names(icv0, dst);
-                cexpr._var_names(icv1, dst);
-            }
-
-            IFunc_3F(_, icv0, icv1, icv2) => {
-                cexpr._var_names(icv0, dst);
-                cexpr._var_names(icv1, dst);
-                cexpr._var_names(icv2, dst);
-            }
-
-            IFunc_1S_NF(_, _, nicv) => {
-                for icv in nicv {
-                    cexpr._var_names(icv, dst);
-                }
-            }
-
-            ILT(licv, ricv)
-            | ILTE(licv, ricv)
-            | IEQ(licv, ricv)
-            | INE(licv, ricv)
-            | IGTE(licv, ricv)
-            | IGT(licv, ricv)
-            | IMod(licv, ricv)
-            | IExp(licv, ricv)
-            | IAdd(licv, ricv)
-            | IMul(licv, ricv)
-            | IOr(licv, ricv)
-            | IAnd(licv, ricv)
-            | IMin(licv, ricv)
-            | IMax(licv, ricv) => {
-                cexpr._var_names(licv, dst);
-                cexpr._var_names(ricv, dst);
-            }
-            _ => (),
-        }
-    }
     #[inline]
-    fn eval(&self, cexpr: &CExpr, ctx: &impl Context) -> Result<f64, Error> {
+    fn eval(&self, cexpr: &CExpr, ctx: &[f64]) -> Result<f64, Error> {
         match self {
             // I have manually ordered these match arms in a way that I feel should deliver good performance.
             // (I don't think this ordering actually affects the generated code, though.)s
@@ -158,29 +88,30 @@ impl Evaler for Instruction {
             INeg(icv) => Ok(-cexpr._eval(icv, ctx)?),
             IInv(icv) => Ok(1.0 / cexpr._eval(icv, ctx)?),
 
-            IVar(name) => ctx
-                .lookup(name, &[])
-                .ok_or_else(|| Error::Undefined(name.to_string())),
+            IVar(i) => ctx
+                .get(*i)
+                .ok_or_else(|| Error::Undefined("ERROR".to_string()))
+                .copied(),
 
-            IFunc_1F(f, icv) => {
+            IFunc_F_F(f, icv) => {
                 let v = cexpr._eval(icv, ctx)?;
                 Ok(f(v))
             }
 
-            IFunc_2F(f, icv0, icv1) => {
+            IFunc_FF_F(f, icv0, icv1) => {
                 let v0 = cexpr._eval(icv0, ctx)?;
                 let v1 = cexpr._eval(icv1, ctx)?;
                 Ok(f(v0, v1))
             }
 
-            IFunc_3F(f, icv0, icv1, icv2) => {
+            IFunc_FFF_F(f, icv0, icv1, icv2) => {
                 let v0 = cexpr._eval(icv0, ctx)?;
                 let v1 = cexpr._eval(icv1, ctx)?;
                 let v2 = cexpr._eval(icv2, ctx)?;
                 Ok(f(v0, v1, v2))
             }
 
-            IFunc_4F(f, icv0, icv1, icv2, icv3) => {
+            IFunc_FFFF_F(f, icv0, icv1, icv2, icv3) => {
                 let v0 = cexpr._eval(icv0, ctx)?;
                 let v1 = cexpr._eval(icv1, ctx)?;
                 let v2 = cexpr._eval(icv2, ctx)?;
@@ -188,7 +119,7 @@ impl Evaler for Instruction {
                 Ok(f(v0, v1, v2, v3))
             }
 
-            IFunc_5F(f, icv0, icv1, icv2, icv3, icv4) => {
+            IFunc_FFFFF_F(f, icv0, icv1, icv2, icv3, icv4) => {
                 let v0 = cexpr._eval(icv0, ctx)?;
                 let v1 = cexpr._eval(icv1, ctx)?;
                 let v2 = cexpr._eval(icv2, ctx)?;
@@ -226,15 +157,14 @@ impl Evaler for Instruction {
                 Ok(f(&sargs, &args))
             }
 
-            IFunc(name, _, nicv) => {
-                let mut args = Vec::with_capacity(nicv.len());
-                for icv in nicv {
-                    args.push(cexpr._eval(icv, ctx)?);
-                }
-                ctx.lookup(name, &args)
-                    .ok_or_else(|| Error::Undefined(name.to_string()))
-            }
-
+            // IFunc(name, _, nicv) => {
+            //     let mut args = Vec::with_capacity(nicv.len());
+            //     for icv in nicv {
+            //         args.push(cexpr._eval(icv, ctx)?);
+            //     }
+            //     ctx.lookup(name, &args)
+            //         .ok_or_else(|| Error::Undefined(name.to_string()))
+            // }
             IMin(licv, ricv) => {
                 let l = cexpr._eval(licv, ctx)?;
                 let r = cexpr._eval(ricv, ctx)?;
@@ -278,8 +208,48 @@ impl Evaler for Instruction {
 
             // Put these last because you should be using the eval_compiled*!() macros to eliminate function calls.
             IConst(c) => Ok(*c),
-            IRef(i, cache) => cexpr._eval_ref(*i, *cache, ctx),
+            // IRef(i, cache) => cexpr._eval_ref(*i, *cache, ctx),
             // _ => unimplemented!(),
         }
+    }
+}
+
+#[cfg(test)]
+mod test {
+    use super::*;
+    use crate::parser::Ast;
+
+    #[test]
+    fn test_eval() {
+        let mut ast = Ast::new();
+        let mut cexpr = CExpr::new();
+
+        // let ctx = |name: &str, _: &[_]| match name {
+        //     "x" => Some(10.0),
+        //     "y" => Some(5.0),
+        //     "z" => Some(3.0),
+        //     "w" => Some(4.0),
+        //     _ => None,
+        // };
+
+        let expr_str = "i=8;b=4+7+i; a=((1+5) -b+4 +x -x+x+5+b-i);a";
+        eprintln!("Test expr: '{}'\n", expr_str);
+
+        ast.parse(expr_str);
+        cexpr.vars = IndexSet::from_iter(
+            [
+                "x".to_owned(),
+                "y".to_owned(),
+                "z".to_owned(),
+                "w".to_owned(),
+            ]
+            .into_iter(),
+        );
+        let ctx = [10.0, 5.0, 3.0, 4.0];
+        ast.compile(&mut cexpr);
+        println!("{:?}", ast);
+        let v = cexpr.eval(&ctx).unwrap();
+        println!("{:?}", cexpr);
+        assert_eq!(1.0, v);
     }
 }

@@ -504,35 +504,35 @@ where
     Ok(())
 }
 
-/// The `eval()` function provides a very simple way to perform expression evaluation with just one function call.
-///
-/// If you only need to evaluate an expression one time, then `eval()` will
-/// probably be perfectly adequate.  But if you plan to evaluate the same
-/// expression many times, or if you plan to evaluate many expressions, you
-/// are able to achieve better performance by allocating a single `Ast` and
-/// using it to perform multiple parse-compile-eval cycles yourself.
-///
-/// # Errors
-///
-/// If there are any [`Error`](../error/enum.Error.html)s during the parse-eval process, they will be returned.
-///
-/// # Examples
-///
-/// [See the `expre` top-level documentation for examples.](../index.html#easy-evaluation)
-pub fn eval(expr_str: &str, ctx: &impl Context) -> Result<f64, Error> {
-    CExpr::from_str(expr_str)?.eval(ctx)
-}
+// /// The `eval()` function provides a very simple way to perform expression evaluation with just one function call.
+// ///
+// /// If you only need to evaluate an expression one time, then `eval()` will
+// /// probably be perfectly adequate.  But if you plan to evaluate the same
+// /// expression many times, or if you plan to evaluate many expressions, you
+// /// are able to achieve better performance by allocating a single `Ast` and
+// /// using it to perform multiple parse-compile-eval cycles yourself.
+// ///
+// /// # Errors
+// ///
+// /// If there are any [`Error`](../error/enum.Error.html)s during the parse-eval process, they will be returned.
+// ///
+// /// # Examples
+// ///
+// /// [See the `expre` top-level documentation for examples.](../index.html#easy-evaluation)
+// pub fn eval(expr_str: &str, ctx: &impl Context) -> Result<f64, Error> {
+//     CExpr::from_str(expr_str)?.eval(ctx)
+// }
 
-pub fn eval2(
-    expr_str: &str,
-    ast: &mut Ast,
-    cexpr: &mut CExpr,
-    ctx: &impl Context,
-) -> Result<f64, Error> {
-    expr_str.parse_expr(ast)?;
-    ast.compile(cexpr);
-    cexpr.eval(ctx)
-}
+// pub fn eval2(
+//     expr_str: &str,
+//     ast: &mut Ast,
+//     cexpr: &mut CExpr,
+//     ctx: &impl Context,
+// ) -> Result<f64, Error> {
+//     expr_str.parse_expr(ast)?;
+//     ast.compile(cexpr);
+//     cexpr.eval(ctx)
+// }
 
 // wxpre::parse(&exprstr).compile(&bulitins).eval(&env)
 // let cexpr = expre::compile(expr_str)?;

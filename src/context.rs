@@ -12,3 +12,15 @@ where
         self(name, args)
     }
 }
+
+pub trait Context2<F, U, V> {
+    fn get_float(&self, index: usize) -> Option<F> {
+        None
+    }
+    fn get_vec2(&self, index: usize) -> Option<U> {
+        None
+    }
+    fn get_vec3(&self, index: usize) -> Option<V> {
+        None
+    }
+}

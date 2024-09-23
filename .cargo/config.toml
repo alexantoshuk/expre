@@ -1,0 +1,10 @@
+
+[build]
+# rustflags = ["-C", "target-cpu=native", "-L",  "c:/embree-3.13.5.x64.vc14.windows/lib"]
+rustflags = ["-C", "target-cpu=native"]
+
+# [profile.release]
+# lto = true
+# panic = "abort"
+# codegen-units = 1
+# opt-level = 3

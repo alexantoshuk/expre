@@ -25,7 +25,9 @@ codegen-units = 1
 lto = "fat"
 
 [dependencies]
+arrayvec = "0.7.6"
 dyn-fmt = "^0.4"
+indexmap = "2.5.0"
 num-traits = "^0.2"
 
 

@@ -43,28 +43,28 @@ impl Debug for I {
 impl Deref for I {
     type Target = usize;
 
-    #[inline(always)]
+    #[inline]
     fn deref(&self) -> &Self::Target {
         &self.0
     }
 }
 
 impl From<usize> for I {
-    #[inline(always)]
+    #[inline]
     fn from(value: usize) -> Self {
         I(value)
     }
 }
 
 impl From<I> for usize {
-    #[inline(always)]
+    #[inline]
     fn from(value: I) -> Self {
         value.0
     }
 }
 
 /// Use this function to parse an expression String. The `Ast` will be cleared first.
-#[inline(always)]
+#[inline]
 pub fn parse<S: AsRef<str>>(expr_str: S, ast: &mut Ast) -> Result<(), Error> {
     ast.parse(expr_str)
 }
@@ -74,7 +74,7 @@ pub trait ParseExpr {
 }
 
 impl<S: AsRef<str>> ParseExpr for S {
-    #[inline(always)]
+    #[inline]
     fn parse_expr(&self, ast: &mut Ast) -> Result<(), Error> {
         ast.parse(self)
     }
@@ -127,7 +127,7 @@ impl Ast {
     }
 
     /// Clears all data from [`Ast`](struct.ParseAST.html) and [`Ast`](struct.CompileAST.html).
-    #[inline(always)]
+    #[inline]
     pub fn clear(&mut self) {
         self.exprs.clear();
         self.local_vars.clear();
@@ -136,13 +136,13 @@ impl Ast {
     /// Returns a reference to the [`Expr`](../parser/struct.Expr.html)
     /// located at `expr_i` within the `Ast.exprs'.
     ///
-    #[inline(always)]
+    #[inline]
     pub fn get_expr(&self, expr_i: I) -> &Expr {
         // I'm using this non-panic match structure to boost performance:
         self.exprs.get(expr_i.0).unwrap()
     }
 
-    #[inline(always)]
+    #[inline]
     pub fn last(&self) -> Option<&Expr> {
         self.exprs.last()
     }
@@ -150,7 +150,7 @@ impl Ast {
     /// Returns a reference to the [`Value`](../parser/enum.Value.html)
     /// located at `val_i` within the `Ast.vals'.
     ///
-    #[inline(always)]
+    #[inline]
     pub fn get_val(&self, val_i: I) -> &Value {
         // self.vals.get(val_i).unwrap()
         &self.exprs.get(val_i.0).unwrap().0
@@ -158,7 +158,7 @@ impl Ast {
 
     /// Appends an `Expr` to `Ast.0`.
     ///
-    #[inline(always)]
+    #[inline]
     pub fn push_expr(&mut self, expr: Expr) -> I {
         let i = self.exprs.len();
 
@@ -166,7 +166,7 @@ impl Ast {
         i.into()
     }
 
-    #[inline(always)]
+    #[inline]
     pub fn push_val(&mut self, val: Value) -> I {
         let i = self.exprs.len();
 
@@ -309,7 +309,7 @@ pub enum ExprOrString {
 use ExprOrString::{EExpr, EStr};
 
 impl Ast {
-    #[inline(always)]
+    #[inline]
     fn read_expr(&mut self, bs: &mut &[u8], depth: usize, expect_eof: bool) -> Result<I, Error> {
         if depth > DEFAULT_EXPR_DEPTH_LIMIT {
             return Err(Error::TooDeep);
@@ -325,7 +325,7 @@ impl Ast {
             let e = if let Some(i) = self.local_vars.get(varname) {
                 ERef(*i)
             } else {
-                EVar(varname.into())
+                EVar(varname.into()) //TODO: assignop with no var exists? syntax error?
             };
             let i = match aop {
                 EAddAssign => self.push_expr(Expr(e, vec![(EAdd, EUnaryOp(EParen(i)))])),
@@ -366,7 +366,7 @@ impl Ast {
         Ok(i)
     }
 
-    #[inline(always)]
+    #[inline]
     fn read_expr_or_string(&mut self, bs: &mut &[u8], depth: usize) -> Result<ExprOrString, Error> {
         if let Some(s) = read_string(bs)? {
             Ok(EStr(s))
@@ -375,7 +375,7 @@ impl Ast {
         }
     }
 
-    #[inline(always)]
+    #[inline]
     fn read_value(&mut self, bs: &mut &[u8], depth: usize) -> Result<Value, Error> {
         if depth > DEFAULT_EXPR_DEPTH_LIMIT {
             return Err(Error::TooDeep);
@@ -397,7 +397,7 @@ impl Ast {
         Err(Error::InvalidValue)
     }
 
-    #[inline(always)]
+    #[inline]
     fn read_unaryop(&mut self, bs: &mut &[u8], depth: usize) -> Result<Option<UnaryOp>, Error> {
         spaces(bs);
         match peek(bs) {
@@ -441,7 +441,7 @@ impl Ast {
         }
     }
 
-    #[inline(always)]
+    #[inline]
     fn read_callable(&mut self, bs: &mut &[u8], depth: usize) -> Result<Option<Value>, Error> {
         match read_varname(bs)? {
             None => Ok(None),
@@ -459,7 +459,7 @@ impl Ast {
         }
     }
 
-    #[inline(always)]
+    #[inline]
     fn read_func(
         &mut self,
         fname: String,
@@ -515,32 +515,32 @@ impl Ast {
     }
 }
 
-#[inline(always)]
+#[inline]
 fn peek(bs: &[u8]) -> Option<u8> {
     bs.first().copied()
 }
 
-#[inline(always)]
+#[inline]
 fn peek_n(bs: &[u8], n: usize) -> Option<u8> {
     bs.get(n).copied()
 }
 
-#[inline(always)]
+#[inline]
 fn peek_is(bs: &[u8], n: usize, b: u8) -> bool {
     bs.get(n).copied() == Some(b)
 }
 
-#[inline(always)]
+#[inline]
 fn skip(bs: &mut &[u8]) {
     *bs = &bs[1..];
 }
 
-#[inline(always)]
+#[inline]
 fn skip_n(bs: &mut &[u8], n: usize) {
     *bs = &bs[n..];
 }
 
-#[inline(always)]
+#[inline]
 fn is_space(b: u8) -> bool {
     if b > b' ' {
         false
@@ -549,7 +549,7 @@ fn is_space(b: u8) -> bool {
     }
 }
 
-#[inline(always)]
+#[inline]
 fn spaces(bs: &mut &[u8]) {
     while let Some(b) = peek(bs) {
         if !is_space(b) {
@@ -559,7 +559,7 @@ fn spaces(bs: &mut &[u8]) {
     }
 }
 
-#[inline(always)]
+#[inline]
 fn read(bs: &mut &[u8]) -> Option<u8> {
     bs.first().map(|b| {
         *bs = &bs[1..];
@@ -567,7 +567,7 @@ fn read(bs: &mut &[u8]) -> Option<u8> {
     })
 }
 
-#[inline(always)]
+#[inline]
 fn read_const(bs: &mut &[u8]) -> Result<Option<f64>, Error> {
     spaces(bs);
 
@@ -608,7 +608,7 @@ fn read_const(bs: &mut &[u8]) -> Result<Option<f64>, Error> {
     Ok(Some(val))
 }
 
-#[inline(always)]
+#[inline]
 fn read_binaryop(bs: &mut &[u8]) -> Result<Option<BinaryOp>, Error> {
     spaces(bs);
     match peek(bs) {
@@ -679,7 +679,7 @@ fn read_binaryop(bs: &mut &[u8]) -> Result<Option<BinaryOp>, Error> {
     }
 }
 
-#[inline(always)]
+#[inline]
 fn read_assignop(bs: &mut &[u8]) -> Result<Option<AssignOp>, Error> {
     spaces(bs);
     match peek(bs) {
@@ -699,7 +699,7 @@ fn read_assignop(bs: &mut &[u8]) -> Result<Option<AssignOp>, Error> {
     }
 }
 
-#[inline(always)]
+#[inline]
 fn read_varname(bs: &mut &[u8]) -> Result<Option<String>, Error> {
     spaces(bs);
 
@@ -717,7 +717,7 @@ fn read_varname(bs: &mut &[u8]) -> Result<Option<String>, Error> {
     Ok(Some(out))
 }
 
-#[inline(always)]
+#[inline]
 fn read_open_parenthesis(bs: &mut &[u8]) -> Result<Option<u8>, Error> {
     spaces(bs);
 
@@ -727,7 +727,7 @@ fn read_open_parenthesis(bs: &mut &[u8]) -> Result<Option<u8>, Error> {
     }
 }
 
-#[inline(always)]
+#[inline]
 fn read_string(bs: &mut &[u8]) -> Result<Option<String>, Error> {
     spaces(bs);
 
@@ -768,7 +768,7 @@ fn read_string(bs: &mut &[u8]) -> Result<Option<String>, Error> {
     }
 }
 
-#[inline(always)]
+#[inline]
 fn is_varname_byte(b: u8, i: usize) -> bool {
     (b'A' <= b && b <= b'Z')
         || (b'a' <= b && b <= b'z')
@@ -776,7 +776,7 @@ fn is_varname_byte(b: u8, i: usize) -> bool {
         || (i > 0 && (b'0' <= b && b <= b'9'))
 }
 
-#[inline(always)]
+#[inline]
 fn is_varname_byte_opt(bo: Option<u8>, i: usize) -> bool {
     match bo {
         Some(b) => is_varname_byte(b, i),

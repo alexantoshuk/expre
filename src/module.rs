@@ -1,7 +1,7 @@
 use dyn_fmt::*;
+use indexmap::IndexSet;
 use num_traits::{self, FloatConst};
 use std::fmt::{Debug, Display};
-
 pub trait Float: num_traits::Float + From<f32> + Display + FloatConst {
     #[inline(always)]
     fn round_to(x: Self, n: Self) -> Self {
@@ -66,19 +66,23 @@ pub trait Module<F: Float> {
     fn constant(name: &str) -> Option<F> {
         None
     }
-    fn func_1f(name: &str) -> Option<fn(F) -> F> {
+
+    fn func_f(&self, name: &str) -> Option<fn() -> F> {
         None
     }
-    fn func_2f(name: &str) -> Option<fn(F, F) -> F> {
+    fn func_f_f(name: &str) -> Option<fn(F) -> F> {
         None
     }
-    fn func_3f(name: &str) -> Option<fn(F, F, F) -> F> {
+    fn func_ff_f(name: &str) -> Option<fn(F, F) -> F> {
         None
     }
-    fn func_4f(name: &str) -> Option<fn(F, F, F, F) -> F> {
+    fn func_fff_f(name: &str) -> Option<fn(F, F, F) -> F> {
         None
     }
-    fn func_5f(name: &str) -> Option<fn(F, F, F, F, F) -> F> {
+    fn func_ffff_f(name: &str) -> Option<fn(F, F, F, F) -> F> {
+        None
+    }
+    fn func_fffff_f(name: &str) -> Option<fn(F, F, F, F, F) -> F> {
         None
     }
     fn func_nf(name: &str) -> Option<fn(&[F]) -> F> {
@@ -98,7 +102,14 @@ pub trait Module<F: Float> {
     }
 }
 
+pub struct Vars {
+    pub float: IndexSet<String>, //float
+    pub vec2: IndexSet<String>,  //vec2
+    pub vec3: IndexSet<String>,  //vec3
+}
+
 pub struct Builtins {}
+
 impl<F: Float> Module<F> for Builtins {
     /// Get the const associated with the given `name`
     #[inline(always)]
@@ -116,7 +127,7 @@ impl<F: Float> Module<F> for Builtins {
 
     /// Get the math function associated with the given `name`
     #[inline(always)]
-    fn func_1f(name: &str) -> Option<fn(F) -> F> {
+    fn func_f_f(name: &str) -> Option<fn(F) -> F> {
         match name {
             "sqrt" => Some(F::sqrt),
             "round" => Some(F::round),
@@ -148,7 +159,7 @@ impl<F: Float> Module<F> for Builtins {
     }
 
     #[inline(always)]
-    fn func_2f(name: &str) -> Option<fn(F, F) -> F> {
+    fn func_ff_f(name: &str) -> Option<fn(F, F) -> F> {
         match name {
             "pow" => Some(F::powf),
             "log" => Some(F::log),
@@ -161,9 +172,9 @@ impl<F: Float> Module<F> for Builtins {
     }
 
     #[inline(always)]
-    fn func_3f(name: &str) -> Option<fn(F, F, F) -> F> {
+    fn func_fff_f(name: &str) -> Option<fn(F, F, F) -> F> {
         match name {
-            "clamp" => Some(F::clamp),
+            "clamp" => Some(<F as crate::module::Float>::clamp),
             "linear" => Some(F::linear),
             "fit01" => Some(F::fit01),
             _ => None,
@@ -171,14 +182,14 @@ impl<F: Float> Module<F> for Builtins {
     }
 
     #[inline(always)]
-    fn func_4f(name: &str) -> Option<fn(F, F, F, F) -> F> {
+    fn func_ffff_f(name: &str) -> Option<fn(F, F, F, F) -> F> {
         match name {
             _ => None,
         }
     }
 
     #[inline(always)]
-    fn func_5f(name: &str) -> Option<fn(F, F, F, F, F) -> F> {
+    fn func_fffff_f(name: &str) -> Option<fn(F, F, F, F, F) -> F> {
         match name {
             "fit" => Some(F::fit),
             _ => None,
@@ -194,14 +205,32 @@ impl<F: Float> Module<F> for Builtins {
     }
 }
 
-pub struct UserModuleExample {}
-impl<F: Float> Module<F> for UserModuleExample {
-    /// Get the const associated with the given `name`
-    #[inline(always)]
-    fn constant(name: &str) -> Option<F> {
-        match name {
-            "SUPERNUMBER" => Some(42_f32.into()),
-            _ => Builtins::constant(name),
-        }
-    }
+#[derive(Copy, Clone)]
+struct Globals {
+    a: f32,
+    b: f32,
 }
+// pub struct UserModuleExample<'a> {
+//     globals: &'a Globals,
+// }
+// impl Module<f32> for UserModuleExample<'_> {
+//     /// Get the const associated with the given `name`
+//     #[inline(always)]
+//     fn constant(name: &str) -> Option<f32> {
+//         match name {
+//             "SUPERNUMBER" => Some(42_f32.into()),
+//             _ => Builtins::constant(name),
+//         }
+//     }
+
+//     fn func_f(&self, name: &str) -> Option<fn(&G,F) -> f32> {
+//         match name {
+//             "rand" => {
+//                 let id = self.globals.a;
+//                 Some(|globals| globals.id + 1.0f32)
+//             }
+//             // "round" => Some(F::round),
+//             _ => None,
+//         }
+//     }
+// }
