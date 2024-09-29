@@ -1,4 +1,4 @@
-//! This module contains `fasteval`'s Error type: an `enum` that contains all errors
+//! This module contains `expre`'s Error type: an `enum` that contains all errors
 //! that can be produced by the `fasteval` API.
 
 use std::fmt;

@@ -1,7 +1,11 @@
+use crate::compiler::{Func, ICV};
+use crate::error::Error;
 use dyn_fmt::*;
+use indexmap::IndexMap;
 use indexmap::IndexSet;
 use num_traits::{self, FloatConst};
 use std::fmt::{Debug, Display};
+
 pub trait Float: num_traits::Float + From<f32> + Display + FloatConst {
     #[inline(always)]
     fn round_to(x: Self, n: Self) -> Self {
@@ -62,42 +66,18 @@ pub trait Float: num_traits::Float + From<f32> + Display + FloatConst {
 impl Float for f32 {}
 impl Float for f64 {}
 
-pub trait Module<F: Float> {
-    fn constant(name: &str) -> Option<F> {
+pub trait Module: Default {
+    fn constant(name: &str) -> Option<f64> {
         None
     }
 
-    fn func_f(&self, name: &str) -> Option<fn() -> F> {
-        None
-    }
-    fn func_f_f(name: &str) -> Option<fn(F) -> F> {
-        None
-    }
-    fn func_ff_f(name: &str) -> Option<fn(F, F) -> F> {
-        None
-    }
-    fn func_fff_f(name: &str) -> Option<fn(F, F, F) -> F> {
-        None
-    }
-    fn func_ffff_f(name: &str) -> Option<fn(F, F, F, F) -> F> {
-        None
-    }
-    fn func_fffff_f(name: &str) -> Option<fn(F, F, F, F, F) -> F> {
-        None
-    }
-    fn func_nf(name: &str) -> Option<fn(&[F]) -> F> {
+    fn func(&self, name: &str, args: &[ICV]) -> Option<Func> {
         None
     }
 
-    fn func_1s_nf(name: &str) -> Option<fn(&str, &[F]) -> F> {
-        None
-    }
+    fn add_var(&mut self, name: String, val: &f64) {}
 
-    fn func_2s_nf(name: &str) -> Option<fn(&str, &str, &[F]) -> F> {
-        None
-    }
-
-    fn func_ns_nf(name: &str) -> Option<fn(&[&str], &[F]) -> F> {
+    fn get_var(&self, name: &str) -> Option<*const f64> {
         None
     }
 }
@@ -108,108 +88,147 @@ pub struct Vars {
     pub vec3: IndexSet<String>,  //vec3
 }
 
-pub struct Builtins {}
+pub struct Builtins {
+    vars: IndexMap<String, *const f64>,
+}
 
-impl<F: Float> Module<F> for Builtins {
+impl Default for Builtins {
+    fn default() -> Self {
+        Self {
+            vars: IndexMap::new(),
+        }
+    }
+}
+
+impl Builtins {
+    pub fn new() -> Self {
+        Self {
+            vars: IndexMap::new(),
+        }
+    }
+}
+
+impl Module for Builtins {
     /// Get the const associated with the given `name`
     #[inline(always)]
-    fn constant(name: &str) -> Option<F> {
+    fn constant(name: &str) -> Option<f64> {
         match name {
-            "PI" => Some(F::PI()),
-            "E" => Some(F::E()),
-            "EPS" => Some(F::epsilon()),
-            // "NAN" => Some(F::nan()),
-            // "INF" => Some(F::infinity()),
-            // "NEG_INF" => Some(F::neg_infinity()),
-            _ => None,
-        }
-    }
-
-    /// Get the math function associated with the given `name`
-    #[inline(always)]
-    fn func_f_f(name: &str) -> Option<fn(F) -> F> {
-        match name {
-            "sqrt" => Some(F::sqrt),
-            "round" => Some(F::round),
-            "floor" => Some(F::floor),
-            "ceil" => Some(F::ceil),
-            "abs" => Some(F::abs),
-            "sin" => Some(F::sin),
-            "cos" => Some(F::cos),
-            "tan" => Some(F::tan),
-            "exp" => Some(F::exp),
-            "ln" => Some(F::ln),
-            "log2" => Some(F::log2),
-            "log10" => Some(F::log10),
-            "trunc" => Some(F::trunc),
-            "fract" => Some(F::fract),
-            "cbrt" => Some(F::cbrt),
-            "asin" => Some(F::asin),
-            "acos" => Some(F::acos),
-            "atan" => Some(F::atan),
-            "sinh" => Some(F::sinh),
-            "cosh" => Some(F::cosh),
-            "tanh" => Some(F::tanh),
-            "asinh" => Some(F::asinh),
-            "acosh" => Some(F::acosh),
-            "atanh" => Some(F::atanh),
-            "clamp01" => Some(F::clamp01),
+            "PI" => Some(f64::PI()),
+            "E" => Some(f64::E()),
+            // "EPS" => Some(f64::epsilon()),
+            // "NAN" => Some(f64::nan()),
+            // "INF" => Some(f64::infinity()),
+            // "NEG_INF" => Some(f64::neg_infinity()),
             _ => None,
         }
     }
 
     #[inline(always)]
-    fn func_ff_f(name: &str) -> Option<fn(F, F) -> F> {
-        match name {
-            "pow" => Some(F::powf),
-            "log" => Some(F::log),
-            "round" => Some(F::round_to),
-            "hypot" => Some(F::hypot),
-            "atan2" => Some(F::atan2),
-            "bias" => Some(F::bias),
+    fn func(&self, name: &str, args: &[ICV]) -> Option<Func> {
+        match (name, args) {
+            ("sqrt", &[a]) => Some(Func::F_F(f64::sqrt, a)),
+            ("sin", &[a]) => Some(Func::F_F(f64::sin, a)),
+            ("cos", &[a]) => Some(Func::F_F(f64::cos, a)),
+            ("tan", &[a]) => Some(Func::F_F(f64::tan, a)),
+            ("abs", &[a]) => Some(Func::F_F(f64::abs, a)),
             _ => None,
         }
     }
 
-    #[inline(always)]
-    fn func_fff_f(name: &str) -> Option<fn(F, F, F) -> F> {
-        match name {
-            "clamp" => Some(<F as crate::module::Float>::clamp),
-            "linear" => Some(F::linear),
-            "fit01" => Some(F::fit01),
-            _ => None,
-        }
+    fn add_var(&mut self, name: String, val: &f64) {
+        self.vars.insert(name, val);
     }
 
-    #[inline(always)]
-    fn func_ffff_f(name: &str) -> Option<fn(F, F, F, F) -> F> {
-        match name {
-            _ => None,
-        }
+    fn get_var(&self, name: &str) -> Option<*const f64> {
+        self.vars.get(name).copied()
     }
 
-    #[inline(always)]
-    fn func_fffff_f(name: &str) -> Option<fn(F, F, F, F, F) -> F> {
-        match name {
-            "fit" => Some(F::fit),
-            _ => None,
-        }
-    }
+    //("map", &[a @ _, b@ _, c@_]) => Option<IFunc::SUIF(fn(f32, f32, f32) -> f32, a,b,c, ICV::Var("uv"))>,
+    // Get the math function associated with the given `name`
+    // #[inline(always)]
+    // fn func_f_f(name: &str) -> Option<fn(F) -> F> {
+    //     match name {
+    //         "sqrt" => Some(F::sqrt),
+    //         "round" => Some(F::round),
+    //         "floor" => Some(F::floor),
+    //         "ceil" => Some(F::ceil),
+    //         "abs" => Some(F::abs),
+    //         "sin" => Some(F::sin),
+    //         "cos" => Some(F::cos),
+    //         "tan" => Some(F::tan),
+    //         "exp" => Some(F::exp),
+    //         "ln" => Some(F::ln),
+    //         "log2" => Some(F::log2),
+    //         "log10" => Some(F::log10),
+    //         "trunc" => Some(F::trunc),
+    //         "fract" => Some(F::fract),
+    //         "cbrt" => Some(F::cbrt),
+    //         "asin" => Some(F::asin),
+    //         "acos" => Some(F::acos),
+    //         "atan" => Some(F::atan),
+    //         "sinh" => Some(F::sinh),
+    //         "cosh" => Some(F::cosh),
+    //         "tanh" => Some(F::tanh),
+    //         "asinh" => Some(F::asinh),
+    //         "acosh" => Some(F::acosh),
+    //         "atanh" => Some(F::atanh),
+    //         "clamp01" => Some(F::clamp01),
+    //         _ => None,
+    //     }
+    // }
 
-    #[inline(always)]
-    fn func_1s_nf(name: &str) -> Option<fn(&str, &[F]) -> F> {
-        match name {
-            "print" => Some(F::print),
-            _ => None,
-        }
-    }
+    // #[inline(always)]
+    // fn func_ff_f(name: &str) -> Option<fn(F, F) -> F> {
+    //     match name {
+    //         "pow" => Some(F::powf),
+    //         "log" => Some(F::log),
+    //         "round" => Some(F::round_to),
+    //         "hypot" => Some(F::hypot),
+    //         "atan2" => Some(F::atan2),
+    //         "bias" => Some(F::bias),
+    //         _ => None,
+    //     }
+    // }
+
+    // #[inline(always)]
+    // fn func_fff_f(name: &str) -> Option<fn(F, F, F) -> F> {
+    //     match name {
+    //         "clamp" => Some(<F as crate::module::Float>::clamp),
+    //         "linear" => Some(F::linear),
+    //         "fit01" => Some(F::fit01),
+    //         _ => None,
+    //     }
+    // }
+
+    // #[inline(always)]
+    // fn func_ffff_f(name: &str) -> Option<fn(F, F, F, F) -> F> {
+    //     match name {
+    //         _ => None,
+    //     }
+    // }
+
+    // #[inline(always)]
+    // fn func_fffff_f(name: &str) -> Option<fn(F, F, F, F, F) -> F> {
+    //     match name {
+    //         "fit" => Some(F::fit),
+    //         _ => None,
+    //     }
+    // }
+
+    // #[inline(always)]
+    // fn func_1s_nf(name: &str) -> Option<fn(&str, &[F]) -> F> {
+    //     match name {
+    //         "print" => Some(F::print),
+    //         _ => None,
+    //     }
+    // }
 }
 
-#[derive(Copy, Clone)]
-struct Globals {
-    a: f32,
-    b: f32,
-}
+// #[derive(Copy, Clone)]
+// struct Globals {
+//     a: f32,
+//     b: f32,
+// }
 // pub struct UserModuleExample<'a> {
 //     globals: &'a Globals,
 // }
