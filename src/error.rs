@@ -9,7 +9,7 @@ use std::fmt;
 /// instead of using `panic!()`.
 #[derive(Debug, Clone, PartialEq)]
 pub enum Error {
-    /// Too many Expressions/Values/Instructions were stored in the AST.
+    /// Too many Expressions/Values/Ops were stored in the AST.
     ///
     /// A AST is pre-allocated at the beginning of the process, and it is
     /// not re-sized.  You can use `AST::with_capacity()` to increase the
@@ -56,21 +56,19 @@ pub enum Error {
     UnparsedTokensRemaining(String),
 
     /// A value was expected, but invalid input data was found.
-    InvalidValue,
-
-    /// A value was expected, but invalid input data was found.
     InvalidSyntax(String),
 
     /// An error occurred during the parsing of a f64 number.
     ///
     /// The `String` field contains the data that caused the error.
-    ParseF64(String),
+    InvalidNumericLiteral(String),
 
     /// The expected input data was not found.
     ///
     /// The `String` field tells you what was expected.
-    Expected(String),
+    ExpectedClosingParen(String),
 
+    ExpectedComma(String),
     /// A function was called with the wrong arguments.
     ///
     /// The `String` field contains information about the expected arguments.
@@ -85,6 +83,8 @@ pub enum Error {
     /// that should never execute.  This is more performant than using the
     /// `unreachable!()` macro.
     Unreachable,
+
+    InvalidType(String),
 }
 
 impl std::error::Error for Error {

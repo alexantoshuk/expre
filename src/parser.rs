@@ -1,68 +1,12 @@
-//! This module parses string expressions into an Ast which can then be compiled or evaluated.
-//!
-//! # fasteval Algebra Grammar
-//! ```text
-//! Expr: Value (BinaryOp Value)*
-//!
-//! Value: Constant || UnaryOp || PrintFunc || StdFunc
-//!
-//! Constant: [+-]?[0-9]*(\.[0-9]+)?( ([eE][+-]?[0-9]+) || [pnuµmkKMGT] )?  || [+-]?(NaN || inf)
-//!
-//! UnaryOp: +Value || -Value || (Expr) || [Expr] || !Value
-//!
-//! BinaryOp: + || - || * || / || % || ^ || < || <= || == || != || >= || > || (or || '||') || (and || '&&')
-//!
-//! VarName: [a-zA-Z_][a-zA-Z_0-9]*
-//!
-//! Func: VarName((String)*, (Expr,)*)?  ||  VarName[(Expr,)*]?
-//!
-//! PrintFunc: print(ExprOrString,*)
-//!
-//! String: ".*"
-//! ```
-
+use crate::display_indexed_list;
 use crate::error::Error;
-use crate::write_indexed_list;
-use arrayvec::ArrayVec;
+use crate::tokens::*;
+use core::str;
 use std::collections::BTreeMap;
 use std::fmt::{self, Debug, Display};
-use std::ops::Deref;
 use std::str::{from_utf8, from_utf8_unchecked};
-
 pub const DEFAULT_EXPR_LEN_LIMIT: usize = 1024 * 10;
 pub const DEFAULT_EXPR_DEPTH_LIMIT: usize = 32;
-
-// #[derive(Copy, Clone, PartialEq, Eq, PartialOrd, Ord)]
-// pub struct I(pub usize);
-
-// impl Debug for I {
-//     fn fmt(&self, f: &mut fmt::Formatter) -> Result<(), fmt::Error> {
-//         write!(f, ":{}", self.0)
-//     }
-// }
-
-// impl Deref for I {
-//     type Target = usize;
-
-//     #[inline]
-//     fn deref(&self) -> &Self::Target {
-//         &self.0
-//     }
-// }
-
-// impl From<usize> for I {
-//     #[inline]
-//     fn from(value: usize) -> Self {
-//         I(value)
-//     }
-// }
-
-// impl From<I> for usize {
-//     #[inline]
-//     fn from(value: I) -> Self {
-//         value.0
-//     }
-// }
 
 /// Use this function to parse an expression String. The `Ast` will be cleared first.
 #[inline]
@@ -83,14 +27,14 @@ impl<S: AsRef<str>> ParseExpr for S {
 
 pub struct Ast {
     pub(crate) exprs: Vec<Expr>,
-    local_vars: BTreeMap<String, ICV>,
+    local_vars: BTreeMap<String, ECV>,
 }
 
 impl Ast {
     /// Creates a new default-sized `Ast`.
     #[inline]
     pub fn new() -> Self {
-        Self::with_capacity(64)
+        Self::with_capacity(8)
     }
 
     /// Creates a new `Ast` with the given capacity.
@@ -139,7 +83,7 @@ impl Ast {
     ///
     #[inline]
     pub fn get_expr(&self, expr_i: usize) -> &Expr {
-        // I'm using this non-panic match structure to boost performance:
+        // F'm using this non-panic match structure to boost performance:
         self.exprs.get(expr_i).unwrap()
     }
 
@@ -169,7 +113,6 @@ impl Ast {
     #[inline]
     pub fn push_val(&mut self, val: Value) -> usize {
         let i = self.exprs.len();
-
         self.exprs.push(Expr(val, vec![]));
         i
     }
@@ -177,9 +120,12 @@ impl Ast {
 
 impl Debug for Ast {
     fn fmt(&self, f: &mut fmt::Formatter) -> Result<(), fmt::Error> {
-        write!(f, "Ast[")?;
-        write_indexed_list(f, &self.exprs)?;
-        write!(f, "]")?;
+        write!(f, "{:?}", self.exprs)
+    }
+}
+impl Display for Ast {
+    fn fmt(&self, f: &mut fmt::Formatter) -> Result<(), fmt::Error> {
+        display_indexed_list(f, &self.exprs)?;
         Ok(())
     }
 }
@@ -189,183 +135,68 @@ pub(crate) type ExprPair = (BinaryOp, Value);
 /// An `Expr` is the top node of a parsed Ast.
 ///
 /// It can be `compile()`d or `eval()`d.
-#[derive(PartialEq)]
+#[derive(PartialEq, Debug)]
 pub struct Expr(
     pub Value,
     pub Vec<ExprPair>, // cap=8
 );
 
-impl Debug for Expr {
+impl Display for Expr {
     fn fmt(&self, f: &mut fmt::Formatter) -> Result<(), fmt::Error> {
-        if self.1.is_empty() {
-            write!(f, "{:?}", self.0)
+        let Expr(val, pairs) = self;
+        if pairs.is_empty() {
+            write!(f, "{val}")
         } else {
-            write!(f, "{:?}, {:?}", self.0, self.1)
+            write!(f, "{val}")?;
+            for (op, val) in pairs {
+                write!(f, " {op} {val}")?;
+            }
+            Ok(())
         }
     }
 }
-
-/// This enumeration boosts performance because it eliminates expensive function calls and redirection for constant values and vars.
-#[derive(PartialEq, Clone)]
-pub enum ICV {
-    I(usize),
-    EConst(f64),
-    EVar(String),
-}
-
-impl Debug for ICV {
-    fn fmt(&self, f: &mut fmt::Formatter) -> Result<(), fmt::Error> {
-        match self {
-            ICV::I(i) => write!(f, ":{}", i),
-            ICV::EConst(v) => write!(f, "EConst({:?})", v),
-            ICV::EVar(s) => write!(f, "EVar({:?})", s),
-        }
-    }
-}
-
-/// A `Value` can be a Constant, a UnaryOp, a StdFunc, or a PrintFunc.
-#[derive(PartialEq)]
-pub enum Value {
-    ICV(ICV),
-    // EConst(f64),
-    EUnaryOp(UnaryOp),
-    // EVar(String),
-    // ERef(I),
-    EAssignOp(String, AssignOp),
-    EFunc {
-        name: String,
-        // sargs: Vec<String>, // cap=2
-        args: Vec<ICV>, // cap=4
-    },
-    EVector(Vec<ICV>),
-}
-use Value::*;
-
-impl Debug for Value {
-    fn fmt(&self, f: &mut fmt::Formatter) -> Result<(), fmt::Error> {
-        match self {
-            ICV(icv) => write!(f, "{:?}", icv),
-            // EConst(v) => write!(f, "EConst({:?})", v),
-            EUnaryOp(uop) => write!(f, "{:?}", uop),
-            // EVar(s) => write!(f, "EVar({:?})", s),
-            // ERef(i) => write!(f, "ERef({:?})", i),
-            EFunc {
-                name,
-                // sargs, // cap=2
-                args, // cap=4
-            } => write!(f, "EFunc({:?}, {:?})", name, args),
-            EVector(args) => write!(f, "EVector({:?})", args),
-            EAssignOp(_, _) => Ok(()),
-        }
-    }
-}
-
-/// Unary Operators
-#[derive(Debug, PartialEq)]
-pub enum UnaryOp {
-    ENeg(ICV),
-    ENot(ICV),
-    // EParen(ICV),
-}
-use UnaryOp::*;
-
-/// Binary Operators
-#[derive(Debug, PartialEq, PartialOrd, Copy, Clone)]
-pub enum BinaryOp {
-    // Sorted in order of precedence (low-priority to high-priority):
-    // Keep this order in-sync with evaler.rs.  (Search for 'rtol' and 'ltor'.)
-    // ESemi = 0,
-    EOr = 1, // Lowest Priority
-    EAnd = 2,
-    ENE = 3,
-    EEQ = 4,
-    EGTE = 5,
-    ELTE = 6,
-    EGT = 7,
-    ELT = 8,
-    EAdd = 9,
-    ESub = 10,
-    EMul = 11,
-    EDiv = 12,
-    EMod = 13,
-    EExp = 14, // Highest Priority
-}
-use BinaryOp::*;
-
-#[derive(Debug, PartialEq, PartialOrd, Copy, Clone)]
-pub enum AssignOp {
-    // Sorted in order of precedence (low-priority to high-priority):
-    // Keep this order in-sync with evaler.rs.  (Search for 'rtol' and 'ltor'.)
-    EAssign,
-    EAddAssign,
-    ESubAssign,
-    EMulAssign,
-    EDivAssign,
-    EModAssign,
-    EExpAssign,
-}
-
-impl Display for AssignOp {
-    fn fmt(&self, f: &mut fmt::Formatter) -> Result<(), fmt::Error> {
-        match self {
-            EAssign => write!(f, "="),
-            EAddAssign => write!(f, "+="),
-            ESubAssign => write!(f, "-="),
-            EMulAssign => write!(f, "*="),
-            EDivAssign => write!(f, "/="),
-            EModAssign => write!(f, "%="),
-            EExpAssign => write!(f, "^="),
-        }
-    }
-}
-use AssignOp::*;
-
-// /// Used by the `print()` function.  Can hold an `Expression` or a `String`.
-// #[derive(Debug, PartialEq)]
-// pub enum ExprOrString {
-//     EExpr(I),
-//     EStr(String), // cap=64
-// }
-// use ExprOrString::{EExpr, EStr};
 
 impl Ast {
     #[inline]
-    fn read_expr(&mut self, bs: &mut &[u8], depth: usize, expect_eof: bool) -> Result<ICV, Error> {
+    fn read_expr(&mut self, bs: &mut &[u8], depth: usize, expect_eof: bool) -> Result<ECV, Error> {
         if depth > DEFAULT_EXPR_DEPTH_LIMIT {
             return Err(Error::TooDeep);
         }
 
         let first = self.read_value(bs, depth)?;
 
-        if let EAssignOp(varname, aop) = &first {
+        if let AssignOp(varname, aop) = &first {
             if !expect_eof {
-                return Err(Error::InvalidSyntax(aop.to_string()));
+                return Err(Error::InvalidSyntax(format!(
+                    "{}",
+                    str::from_utf8(bs).unwrap()
+                )));
             }
 
-            let icv = self.read_expr(bs, depth, false)?;
-            print!("!!!! {:?}", icv);
+            let ecv = self.read_expr(bs, depth, false)?;
             if aop == &EAssign {
-                self.local_vars.insert(varname.clone(), icv.clone());
-                return Ok(icv);
+                self.local_vars.insert(varname.clone(), ecv.clone());
+                return Ok(ecv);
             }
-            let e = if let Some(icv) = self.local_vars.get(varname) {
-                ICV(icv.clone())
+
+            let e = if let Some(ecv) = self.local_vars.get(varname) {
+                ECV(ecv.clone())
             } else {
-                ICV(ICV::EVar(varname.into()))
+                ECV(Var(varname.into()))
             };
 
             let i = match aop {
-                EAddAssign => self.push_expr(Expr(e, vec![(EAdd, Value::ICV(icv))])),
-                ESubAssign => self.push_expr(Expr(e, vec![(ESub, Value::ICV(icv))])),
-                EMulAssign => self.push_expr(Expr(e, vec![(EMul, Value::ICV(icv))])),
-                EDivAssign => self.push_expr(Expr(e, vec![(EDiv, Value::ICV(icv))])),
-                EModAssign => self.push_expr(Expr(e, vec![(EMod, Value::ICV(icv))])),
-                EExpAssign => self.push_expr(Expr(e, vec![(EExp, Value::ICV(icv))])),
+                EAddAssign => self.push_expr(Expr(e, vec![(Add, Value::ECV(ecv))])),
+                ESubAssign => self.push_expr(Expr(e, vec![(Sub, Value::ECV(ecv))])),
+                EMulAssign => self.push_expr(Expr(e, vec![(Mul, Value::ECV(ecv))])),
+                EDivAssign => self.push_expr(Expr(e, vec![(Div, Value::ECV(ecv))])),
+                EModAssign => self.push_expr(Expr(e, vec![(Mod, Value::ECV(ecv))])),
+                EExpAssign => self.push_expr(Expr(e, vec![(Exp, Value::ECV(ecv))])),
                 _ => unreachable!(),
             };
-            let icv = ICV::I(i);
-            self.local_vars.insert(varname.clone(), icv.clone());
-            return Ok(icv);
+            let ecv = E(i);
+            self.local_vars.insert(varname.clone(), ecv.clone());
+            return Ok(ecv);
         }
 
         let mut pairs = Vec::<ExprPair>::with_capacity(8);
@@ -390,10 +221,10 @@ impl Ast {
         }
 
         match first {
-            ICV(icv) if (pairs.len() == 0) => Ok(icv),
+            ECV(ecv) if (!expect_eof && pairs.len() == 0) => Ok(ecv),
             _ => {
                 let i = self.push_expr(Expr(first, pairs));
-                Ok(ICV::I(i))
+                Ok(E(i))
             }
         }
     }
@@ -412,11 +243,12 @@ impl Ast {
         if depth > DEFAULT_EXPR_DEPTH_LIMIT {
             return Err(Error::TooDeep);
         }
+
         if let Some(c) = read_const(bs)? {
-            return Ok(ICV(ICV::EConst(c)));
+            return Ok(ECV(Const(c)));
         }
         if let Some(u) = self.read_unaryop(bs, depth)? {
-            return Ok(EUnaryOp(u));
+            return Ok(UnaryOp(u));
         }
         if let Some(p) = self.read_parentheses(bs, depth)? {
             return Ok(p);
@@ -433,16 +265,19 @@ impl Ast {
             return Err(Error::EofWhileParsing("value".to_string()));
         }
 
-        Err(Error::InvalidValue)
+        Err(Error::InvalidSyntax(format!(
+            "{}",
+            str::from_utf8(bs).unwrap()
+        )))
     }
 
     #[inline]
-    fn value_to_icv(&mut self, v: Value) -> ICV {
-        if let Value::ICV(icv) = v {
-            icv
+    fn value_to_icv(&mut self, v: Value) -> ECV {
+        if let Value::ECV(ecv) = v {
+            ecv
         } else {
             let i = self.push_val(v);
-            ICV::I(i)
+            E(i)
         }
     }
 
@@ -455,15 +290,15 @@ impl Ast {
                 b'-' => {
                     skip(bs);
                     let v = self.read_value(bs, depth + 1)?;
-                    let icv = self.value_to_icv(v);
-                    Ok(Some(ENeg(icv)))
+                    let ecv = self.value_to_icv(v);
+                    Ok(Some(Neg(ecv)))
                 }
 
                 b'!' => {
                     skip(bs);
                     let v = self.read_value(bs, depth + 1)?;
-                    let icv = self.value_to_icv(v);
-                    Ok(Some(ENot(icv)))
+                    let ecv = self.value_to_icv(v);
+                    Ok(Some(Not(ecv)))
                 }
                 _ => Ok(None),
             },
@@ -480,10 +315,13 @@ impl Ast {
                     skip(bs);
                     let xi = self.read_expr(bs, depth + 1, false)?;
                     spaces(bs);
-                    if read(bs).ok_or(Error::EofWhileParsing("parentheses".into()))? != b')' {
-                        return Err(Error::Expected(")".to_string()));
+                    if read(bs).ok_or(Error::EofWhileParsing(")".into()))? != b')' {
+                        return Err(Error::ExpectedClosingParen(format!(
+                            "{}",
+                            str::from_utf8(bs).unwrap()
+                        )));
                     }
-                    Ok(Some(Value::ICV(xi)))
+                    Ok(Some(Value::ECV(xi)))
                 }
                 _ => Ok(None),
             },
@@ -498,11 +336,11 @@ impl Ast {
                 if let Some(b'(') = read_open_parenthesis(bs)? {
                     Ok(Some(self.read_func(varname, bs, depth)?))
                 } else if let Some(aop) = read_assignop(bs)? {
-                    Ok(Some(EAssignOp(varname, aop)))
-                } else if let Some(icv) = self.local_vars.get(&varname) {
-                    Ok(Some(ICV(icv.clone())))
+                    Ok(Some(AssignOp(varname, aop)))
+                } else if let Some(ecv) = self.local_vars.get(&varname) {
+                    Ok(Some(ECV(ecv.clone())))
                 } else {
-                    Ok(Some(ICV(ICV::EVar(varname))))
+                    Ok(Some(ECV(Var(varname))))
                 }
             }
         }
@@ -510,8 +348,8 @@ impl Ast {
 
     #[inline]
     fn read_func(&mut self, fname: String, bs: &mut &[u8], depth: usize) -> Result<Value, Error> {
-        // let mut sargs = Vec::<String>::with_capacity(2);
-        let mut args = Vec::with_capacity(4);
+        let mut args = Vec::with_capacity(2);
+        let sarg = read_string(bs)?;
 
         loop {
             spaces(bs);
@@ -524,34 +362,22 @@ impl Ast {
                 }
                 None => return Err(Error::EofWhileParsing(fname)),
             }
-            if !args.is_empty() {
+            if sarg.is_some() || !args.is_empty() {
                 match read(bs) {
                     Some(b',') => {}
-                    _ => return Err(Error::Expected("','".to_string())),
+                    _ => {
+                        return Err(Error::ExpectedComma(format!(
+                            "{}",
+                            str::from_utf8(bs).unwrap()
+                        )))
+                    }
                 }
             }
-            // else {
-            //     if let Some(s) = read_string(bs)? {
-            //         sargs.push(s);
 
-            //         match read(bs) {
-            //             Some(b',') => {}
-            //             _ => {
-            //                 return Err(Error::Expected("','".to_string()));
-            //             }
-            //         }
-            //         continue;
-            //     }
-            // }
             args.push(self.read_expr(bs, depth + 1, false)?);
         }
 
-        Ok(EFunc {
-            name: fname,
-            //TODO: string or float or vec2 or vec3
-            //sargs,
-            args,
-        })
+        Ok(Func(fname, sarg, args))
     }
 
     #[inline]
@@ -577,14 +403,19 @@ impl Ast {
                 if !args.is_empty() {
                     match read(bs) {
                         Some(b',') => {}
-                        _ => return Err(Error::Expected("','".to_string())),
+                        _ => {
+                            return Err(Error::ExpectedComma(format!(
+                                "{}",
+                                str::from_utf8(bs).unwrap()
+                            )))
+                        }
                     }
                 }
 
                 args.push(self.read_expr(bs, depth + 1, false)?);
             }
 
-            Ok(Some(EVector(args)))
+            Ok(Some(List(args)))
         } else {
             Ok(None)
         }
@@ -678,7 +509,7 @@ fn read_const(bs: &mut &[u8]) -> Result<Option<f64>, Error> {
     let tok = unsafe { from_utf8_unchecked(&bs[..toklen]) };
     let val = tok
         .parse::<f64>()
-        .map_err(|_| Error::ParseF64(tok.to_string()))?;
+        .map_err(|_| Error::InvalidNumericLiteral(format!("{}", str::from_utf8(bs).unwrap())))?;
     skip_n(bs, toklen);
 
     Ok(Some(val))
@@ -692,66 +523,69 @@ fn read_binaryop(bs: &mut &[u8]) -> Result<Option<BinaryOp>, Error> {
         Some(b) => match b {
             b'+' => {
                 skip(bs);
-                Ok(Some(EAdd))
+                Ok(Some(Add))
             }
             b'-' => {
                 skip(bs);
-                Ok(Some(ESub))
+                Ok(Some(Sub))
             }
             b'*' => {
                 skip(bs);
-                Ok(Some(EMul))
+                Ok(Some(Mul))
             }
             b'/' => {
                 skip(bs);
-                Ok(Some(EDiv))
+                Ok(Some(Div))
             }
             b'%' => {
                 skip(bs);
-                Ok(Some(EMod))
+                Ok(Some(Mod))
             }
             b'^' => {
                 skip(bs);
-                Ok(Some(EExp))
+                Ok(Some(Exp))
             }
             b'<' => {
                 skip(bs);
                 if peek_is(bs, 0, b'=') {
                     skip(bs);
-                    Ok(Some(ELTE))
+                    Ok(Some(LTE))
                 } else {
-                    Ok(Some(ELT))
+                    Ok(Some(LT))
                 }
             }
             b'>' => {
                 skip(bs);
                 if peek_is(bs, 0, b'=') {
                     skip(bs);
-                    Ok(Some(EGTE))
+                    Ok(Some(GTE))
                 } else {
-                    Ok(Some(EGT))
+                    Ok(Some(GT))
                 }
             }
             b'=' if peek_is(bs, 1, b'=') => {
                 skip_n(bs, 2);
-                Ok(Some(EEQ))
+                Ok(Some(EQ))
             }
             b'!' if peek_is(bs, 1, b'=') => {
                 skip_n(bs, 2);
-                Ok(Some(ENE))
+                Ok(Some(NE))
             }
             b'|' if peek_is(bs, 1, b'|') => {
                 skip_n(bs, 2);
-                Ok(Some(EOr))
+                Ok(Some(Or))
             }
 
             b'&' if peek_is(bs, 1, b'&') => {
                 skip_n(bs, 2);
-                Ok(Some(EAnd))
+                Ok(Some(And))
             }
 
             b';' | b')' | b']' | b',' => Ok(None),
-            _ => Err(Error::InvalidSyntax(format!("{}", b as char))),
+            _ => Err(Error::InvalidSyntax(format!(
+                "{}",
+                str::from_utf8(bs).unwrap()
+            ))),
         },
     }
 }
@@ -770,6 +604,26 @@ fn read_assignop(bs: &mut &[u8]) -> Result<Option<AssignOp>, Error> {
             b'+' if peek_is(bs, 1, b'=') => {
                 skip_n(bs, 2);
                 Ok(Some(EAddAssign))
+            }
+            b'-' if peek_is(bs, 1, b'=') => {
+                skip_n(bs, 2);
+                Ok(Some(ESubAssign))
+            }
+            b'*' if peek_is(bs, 1, b'=') => {
+                skip_n(bs, 2);
+                Ok(Some(EMulAssign))
+            }
+            b'/' if peek_is(bs, 1, b'=') => {
+                skip_n(bs, 2);
+                Ok(Some(EDivAssign))
+            }
+            b'%' if peek_is(bs, 1, b'=') => {
+                skip_n(bs, 2);
+                Ok(Some(EModAssign))
+            }
+            b'^' if peek_is(bs, 1, b'=') => {
+                skip_n(bs, 2);
+                Ok(Some(EExpAssign))
             }
             _ => Ok(None),
         },
@@ -882,7 +736,7 @@ mod test {
             assert_eq!(read(bs).unwrap(), 3);
             match read(bs) {
                 None => {}
-                _ => panic!("I expected an EOF"),
+                _ => panic!("F expected an EOF"),
             }
 
             Ok(())
@@ -930,7 +784,7 @@ mod test {
         {
             let bsarr = b"12.34";
             let bs = &mut &bsarr[..];
-            assert_eq!(ast.read_value(bs, 0), Ok(ICV(ICV::EConst(12.34))));
+            assert_eq!(ast.read_value(bs, 0), Ok(ECV(Const(12.34))));
         }
     }
 }

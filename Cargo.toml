@@ -26,9 +26,12 @@ lto = "fat"
 
 [dependencies]
 arrayvec = "0.7.6"
+bytemuck = "1.20.0"
 dyn-fmt = "^0.4"
+gxhash = "3.4.1"
 indexmap = "2.5.0"
 num-traits = "^0.2"
+wide = "0.7.30"
 
 
 [dev-dependencies]
