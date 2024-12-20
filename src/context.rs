@@ -3,10 +3,11 @@ use crate::float::Float;
 use crate::ops::*;
 use std::fmt::Debug;
 use std::hash::Hash;
+
 // pub trait Context: Sized + Clone + Debug {
 //     type FFN: Eq + PartialEq + Hash + Debug; // + FEvaler;
 //     type UFN: Eq + PartialEq + Hash + Debug; // + UEvaler;
-//     type F: Float;
+//     type FO: Float;
 
 //     fn var(_name: &str) -> Option<OP<Self>> {
 //         None
@@ -16,79 +17,85 @@ use std::hash::Hash;
 //         None
 //     }
 
-//     fn get_fvar(&self, offset: usize) -> Self::F {
-//         unsafe { *((self as *const Self as *const Self::F).add(offset)) }
+//     fn get_fvar(&self, offset: usize) -> Self::FO {
+//         unsafe { *((self as *const Self as *const Self::FO).add(offset)) }
 //     }
 
-//     fn get_uvar(&self, offset: usize) -> [Self::F; 2] {
-//         unsafe { *((self as *const Self as *const Self::F).add(offset) as *const [Self::F; 2]) }
+//     fn get_uvar(&self, offset: usize) -> [Self::FO; 2] {
+//         unsafe { *((self as *const Self as *const Self::FO).add(offset) as *const [Self::FO; 2]) }
 //     }
 
-//     fn get_vvar(&self, offset: usize) -> [Self::F; 3] {
-//         unsafe { *((self as *const Self as *const Self::F).add(offset) as *const [Self::F; 3]) }
+//     fn get_vvar(&self, offset: usize) -> [Self::FO; 3] {
+//         unsafe { *((self as *const Self as *const Self::FO).add(offset) as *const [Self::FO; 3]) }
 //     }
+// }
+
+// pub trait FN: Sized + Clone + Debug {
+//     type Output: Float;
+
+//     fn dispatch(_name: &str, _sargs: Option<&str>, _args: &[ICV]) -> Option<Self>;
+//     fn func(&self) -> impl FnOnce() -> Self::Output;
 // }
 
 pub trait Module: Sized + Clone + Debug {
     type FFN: Eq + PartialEq + Hash + Clone + Debug;
     type UFN: Eq + PartialEq + Hash + Clone + Debug;
 
-    fn var(&self, _name: &str) -> Option<OP<Self::FFN, Self::UFN>> {
+    fn dispatch_var(&self, _name: &str) -> Option<&ICV> {
         None
     }
 
-    fn func(
-        &self,
-        _name: &str,
-        _sarg: Option<&str>,
-        _args: &[ICV],
-    ) -> Option<OP<Self::FFN, Self::UFN>> {
+    fn dispatch_func(&self, _name: &str, _args: &[ICV]) -> Option<OP<Self::FFN, Self::UFN>> {
         None
     }
 }
 
-pub trait Context: Sized + Clone + Debug {
-    type F: Float;
-
-    fn get_fvar(&self, offset: usize) -> Self::F {
-        unsafe { *((self as *const Self as *const Self::F).add(offset)) }
+pub trait Context<T: Float>: Sized + Clone + Debug {
+    fn get_fvar(&self, offset: usize) -> T {
+        unsafe { *((self as *const Self as *const T).add(offset)) }
     }
 
-    fn get_uvar(&self, offset: usize) -> [Self::F; 2] {
-        unsafe { *((self as *const Self as *const Self::F).add(offset) as *const [Self::F; 2]) }
+    fn get_uvar(&self, offset: usize) -> [T; 2] {
+        unsafe { *((self as *const Self as *const T).add(offset) as *const [T; 2]) }
     }
 
-    fn get_vvar(&self, offset: usize) -> [Self::F; 3] {
-        unsafe { *((self as *const Self as *const Self::F).add(offset) as *const [Self::F; 3]) }
+    fn get_vvar(&self, offset: usize) -> [T; 3] {
+        unsafe { *((self as *const Self as *const T).add(offset) as *const [T; 3]) }
     }
 }
 
-/// Implement Std context
-#[derive(Clone, Debug)]
-pub struct Std;
+// #[derive(Clone, Debug)]
+// struct ConstCtx;
+// impl Context for ConstCtx {
+//     type T = f64;
+// }
 
-#[derive(Hash, PartialEq, Eq, Debug)]
-pub enum FStdFunc {
-    SIN(FICV),
-}
+// /// Implement Std context
+// #[derive(Clone, Debug)]
+// pub struct Std;
 
-#[derive(Hash, PartialEq, Eq, Debug)]
-pub enum UStdFunc {
-    SIN(UICV),
-}
+// #[derive(Hash, PartialEq, Eq, Debug)]
+// pub enum FStdFunc {
+//     SIN(F),
+// }
+
+// #[derive(Hash, PartialEq, Eq, Debug)]
+// pub enum UStdFunc {
+//     SIN(U),
+// }
 
 // impl Context for Std {
 //     type FFN = FStdFunc;
 //     type UFN = UStdFunc;
-//     type F = f32;
+//     type FO = f32;
 
 //     /// Get the const or var associated with the given `name`
 //     #[inline]
 //     fn var(name: &str) -> Option<OP<Self>> {
 //         match name {
-//             "PI" => Some(F(F::CONST(f64::PI))),
-//             "E" => Some(F(F::CONST(f64::E))),
-//             "EPS" => Some(F(F::CONST(f64::EPSILON))),
+//             "PI" => Some(FO(FO::CONST(f64::PI))),
+//             "E" => Some(FO(FO::CONST(f64::E))),
+//             "EPS" => Some(FO(FO::CONST(f64::EPSILON))),
 //             _ => None,
 //         }
 //     }
@@ -97,8 +104,8 @@ pub enum UStdFunc {
 //     #[inline]
 //     fn func(name: &str, sarg: Option<&str>, args: &[ICV]) -> Option<OP<Self>> {
 //         match (name, sarg, args) {
-//             ("sin", None, &[FICV(icv)]) => Some(F(F::FUNC(Self::FFN::SIN(icv)))),
-//             ("sin", None, &[UICV(icv)]) => Some(U(U::FUNC(Self::UFN::SIN(icv)))),
+//             ("sin", None, &[F(icv)]) => Some(FO(FO::FN(Self::FFN::SIN(icv)))),
+//             ("sin", None, &[U(icv)]) => Some(UO(UO::FN(Self::UFN::SIN(icv)))),
 //             _ => None,
 //         }
 //     }
@@ -116,7 +123,7 @@ pub enum UStdFunc {
 //     #[inline]
 //     fn var(name: &str) -> Option<OP<Self>> {
 //         match name {
-//             "id" => Some(F(F::VAR(123))),
+//             "id" => Some(FO(FO::VAR(123))),
 //             _ => Std::var(name),
 //         }
 //     }

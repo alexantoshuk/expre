@@ -22,25 +22,25 @@
 //!
 //! ## Optimized Memory Layout and Execution
 //! * Variable-length `Expr`/`Value` Ast nodes are converted into constant-sized `OP` nodes.
-//! * The `FICV` enumeration helps to eliminate expensive function calls.
+//! * The `F` enumeration helps to eliminate expensive function calls.
 
 use crate::context::*;
 use crate::error::Error;
-// pub use crate::parser::F;
+// pub use crate::parser::FO;
 // use crate::context::{self, Module};
 use crate::debug_indexed_list;
 use crate::float::*;
 use crate::ops::{self, *};
 use crate::parser::*;
 use crate::tokens::*;
-use crate::{map2, map3};
+// use crate::{map2, map3};
 use indexmap::{IndexMap, IndexSet};
 use std::collections::{BTreeMap, BTreeSet, HashMap};
 use std::fmt::{self, Debug};
 use std::hash::{Hash, Hasher};
 use std::marker::PhantomData;
 
-type OP<M: Module> = ops::OP<M::FFN, M::UFN>;
+type OP<M> = ops::OP<<M as Module>::FFN, <M as Module>::UFN>;
 
 impl Ast {
     pub fn compile<M: Module>(&self, cexpr: &mut CExpr<M>, module: &M) -> Result<(), Error> {
@@ -155,87 +155,100 @@ impl<M: Module> CExpr<M> {
     // #[inline]
     // pub fn instr_to_arg(&mut self, op: OP<M>) -> ICV {
     //     match op {
-    //         F(FICV(a)) => ICV::FICV(a),
-    //         U(UICV(a)) => ICV::UICV(a),
-    //         F(_) => ICV::FICV(F(self.push(op))),
-    //         U(_) => ICV::UICV(U(self.push(op))),
+    //         FO(F(a)) => ICV::F(a),
+    //         UO(U(a)) => ICV::U(a),
+    //         FO(_) => ICV::F(FO(self.push(op))),
+    //         UO(_) => ICV::U(UO(self.push(op))),
     //     }
     // }
 }
 
 // impl OP<M> {
 //     #[inline]
-//     fn to_uicv<M>(self, expr: &mut CExpr<M>) -> FICV {
+//     fn to_uicv<M>(self, expr: &mut CExpr<M>) -> F {
 //         match self {
-//             F(op) => FICV::FICV(op.to_icv(expr)),
-//             U(op) => UICV::UICV(op.to_icv(expr)),
+//             FO(op) => F::F(op.to_icv(expr)),
+//             UO(op) => U::U(op.to_icv(expr)),
 //         }
 //     }
 // }
 
 impl<FFN, UFN> ops::OP<FFN, UFN> {
     #[inline]
-    fn to_ficv<M: Module<FFN = FFN, UFN = UFN>>(self, expr: &mut CExpr<M>) -> FICV {
+    fn to_icv<M: Module<FFN = FFN, UFN = UFN>>(self, expr: &mut CExpr<M>) -> ICV {
         match self {
-            F(F::CONST(c)) => FICV::CONST(c),
-            F(F::VAR(v)) => FICV::VAR(v),
-            F(_) => FICV::I(expr.push(self)),
+            FO(FO::CONST(c)) => F(F::CONST(c)),
+            FO(FO::VAR(v)) => F(F::VAR(v)),
+            FO(_) => F(F::I(expr.push(self))),
 
-            U(U::CONST(c)) => FICV::CONST(c[0]),
-            U(U::VAR(v)) => FICV::VAR(v),
-            U(_) => FICV::I(expr.push(self)),
+            UO(UO::CONST(c)) => U(U::CONST(c)),
+            UO(UO::VAR(v)) => U(U::VAR(v)),
+            UO(_) => U(U::I(expr.push(self))),
         }
     }
 
-    #[inline]
-    fn to_uicv<M: Module<FFN = FFN, UFN = UFN>>(self, expr: &mut CExpr<M>) -> UICV {
-        match self {
-            U(U::CONST(c)) => UICV::CONST(c),
-            U(U::VAR(v)) => UICV::VAR(v),
-            U(_) => UICV::I(expr.push(self)),
+    // #[inline]
+    // fn to_ficv<M: Module<FFN = FFN, UFN = UFN>>(self, expr: &mut CExpr<M>) -> F {
+    //     match self {
+    //         FO(FO::CONST(c)) => F::CONST(c),
+    //         FO(FO::VAR(v)) => F::VAR(v),
+    //         FO(_) => F::I(expr.push(self)),
 
-            F(F::CONST(c)) => UICV::CONST([c; 2]),
-            // F(F::VAR(c)) => UICV::FROM(FICV::VAR(c)),
-            F(_) => UICV::I(expr.push(self)),
-        }
-    }
+    //         UO(UO::CONST(c)) => F::CONST(c[0]),
+    //         UO(UO::VAR(v)) => F::VAR(v),
+    //         UO(_) => F::I(expr.push(self)),
+    //     }
+    // }
+
+    // #[inline]
+    // fn to_uicv<M: Module<FFN = FFN, UFN = UFN>>(self, expr: &mut CExpr<M>) -> U {
+    //     match self {
+    //         UO(UO::CONST(c)) => U::CONST(c),
+    //         UO(UO::VAR(v)) => U::VAR(v),
+    //         UO(_) => U::I(expr.push(self)),
+
+    //         FO(FO::CONST(c)) => U::CONST([c; 2]),
+    //         // FO(FO::VAR(c)) => U::FROM(F::VAR(c)),
+    //         FO(_) => U::I(expr.push(self)),
+    //     }
+    // }
 }
 
-impl<FFN> F<FFN> {
+impl<FFN> FO<FFN> {
     #[inline]
-    fn to_ficv<M: Module<FFN = FFN>>(self, expr: &mut CExpr<M>) -> FICV {
+    fn to_ficv<M: Module<FFN = FFN>>(self, expr: &mut CExpr<M>) -> F {
         match self {
-            F::CONST(c) => FICV::CONST(c),
-            F::VAR(v) => FICV::VAR(v),
-            _ => FICV::I(expr.push(F(self))),
+            FO::CONST(c) => F::CONST(c),
+            FO::VAR(v) => F::VAR(v),
+            _ => F::I(expr.push(FO(self))),
         }
     }
 
-    #[inline]
-    fn to_uicv<M: Module<FFN = FFN>>(self, expr: &mut CExpr<M>) -> UICV {
-        match self {
-            F::CONST(c) => UICV::CONST([c; 2]),
-            _ => UICV::I(expr.push(F(self))),
-        }
-    }
+    // #[inline]
+    // fn to_uicv<M: Module<FFN = FFN>>(self, expr: &mut CExpr<M>) -> U {
+    //     match self {
+    //         FO::CONST(c) => U::CONST([c; 2]),
+    //         _ => U::I(expr.push(FO(self))),
+    //     }
+    // }
 }
 
-impl<UFN> U<UFN> {
-    #[inline]
-    fn to_ficv<M: Module<UFN = UFN>>(self, expr: &mut CExpr<M>) -> FICV {
-        match self {
-            U::CONST(c) => FICV::CONST(c[0]),
-            U::VAR(v) => FICV::VAR(v),
-            _ => FICV::I(expr.push(U(self))),
-        }
-    }
+impl<UFN> UO<UFN> {
+    // #[inline]
+    // fn to_ficv<M: Module<UFN = UFN>>(self, expr: &mut CExpr<M>) -> F {
+    //     match self {
+    //         UO::CONST(c) => F::CONST(c[0]),
+    //         UO::VAR(v) => F::VAR(v),
+    //         _ => F::I(expr.push(UO(self))),
+    //     }
+    // }
 
     #[inline]
-    fn to_uicv<M: Module<UFN = UFN>>(self, expr: &mut CExpr<M>) -> UICV {
+    fn to_uicv<M: Module<UFN = UFN>>(self, expr: &mut CExpr<M>) -> U {
         match self {
-            U::CONST(c) => UICV::CONST(c),
-            U::VAR(v) => UICV::VAR(v),
-            _ => UICV::I(expr.push(U(self))),
+            UO::CONST(c) => U::CONST(c),
+            UO::VAR(v) => U::VAR(v),
+            _ => U::I(expr.push(UO(self))),
         }
     }
 }
@@ -251,133 +264,135 @@ impl<M: Module> CExpr<M> {
     #[inline]
     fn neg_wrap(&mut self, op: OP<M>) -> OP<M> {
         match op {
-            F(F::NEG(_)) | U(U::NEG(_)) => self.pop(),
-            F(F::CONST(c)) => F(F::CONST(-c)),
-            F(op) => F(F::NEG(op.to_ficv(self))),
-            U(U::CONST([x, y])) => U(U::CONST([-x, -y])),
-            U(op) => U(U::NEG(op.to_uicv(self))),
+            FO(FO::NEG(_)) | UO(UO::NEG(_)) => self.pop(),
+            FO(FO::CONST(c)) => FO(FO::CONST(-c)),
+            FO(op) => FO(FO::NEG(op.to_ficv(self))),
+            UO(UO::CONST([x, y])) => UO(UO::CONST([-x, -y])),
+            UO(op) => UO(UO::NEG(op.to_uicv(self))),
         }
     }
 
     #[inline]
     fn not_wrap(&mut self, op: OP<M>) -> OP<M> {
         match op {
-            F(F::NOT(_)) | U(U::NOT(_)) => self.pop(),
-            F(F::CONST(c)) => F(F::CONST((c == 0.0).into())),
-            F(op) => F(F::NOT(op.to_ficv(self))),
-            U(U::CONST([x, y])) => U(U::CONST([(x == 0.0).into(), (y == 0.0).into()])),
-            U(op) => U(U::NOT(op.to_uicv(self))),
+            FO(FO::NOT(_)) | UO(UO::NOT(_)) => self.pop(),
+            FO(FO::CONST(c)) => FO(FO::CONST((c == 0.0).into())),
+            FO(op) => FO(FO::NOT(op.to_ficv(self))),
+            UO(UO::CONST([x, y])) => UO(UO::CONST([(x == 0.0).into(), (y == 0.0).into()])),
+            UO(op) => UO(UO::NOT(op.to_uicv(self))),
         }
     }
 
     #[inline]
     fn inv_wrap(&mut self, op: OP<M>) -> OP<M> {
         match op {
-            F(F::INV(_)) | U(U::INV(_)) => self.pop(),
-            F(F::CONST(c)) => F(F::CONST(c.recip())),
-            F(op) => F(F::INV(op.to_ficv(self))),
-            U(U::CONST([x, y])) => U(U::CONST([x.recip(), y.recip()])),
-            U(op) => U(U::INV(op.to_uicv(self))),
+            FO(FO::INV(_)) | UO(UO::INV(_)) => self.pop(),
+            FO(FO::CONST(c)) => FO(FO::CONST(c.recip())),
+            FO(op) => FO(FO::INV(op.to_ficv(self))),
+            UO(UO::CONST([x, y])) => UO(UO::CONST([x.recip(), y.recip()])),
+            UO(op) => UO(UO::INV(op.to_uicv(self))),
         }
     }
 
     #[inline]
     fn compile_mul(&mut self, sorted_ops: Vec<OP<M>>) -> OP<M> {
-        let mut const_out = F(F::CONST(1.0));
-        let mut out = F(F::CONST(1.0));
+        let mut const_out = FO(FO::CONST(1.0));
+        let mut out = FO(FO::CONST(1.0));
 
         for op in sorted_ops {
             match (out, op) {
-                (F(F::CONST(c0)), F(F::CONST(c1))) => {
-                    out = F(F::CONST(c0 * c1));
+                (FO(FO::CONST(c0)), FO(FO::CONST(c1))) => {
+                    out = FO(FO::CONST(c0 * c1));
                 }
-                (F(F::CONST(c0)), U(U::CONST([cx1, cy1]))) => {
-                    out = U(U::CONST([c0 * cx1, c0 * cy1]));
+                (FO(FO::CONST(c0)), UO(UO::CONST([cx1, cy1]))) => {
+                    out = UO(UO::CONST([c0 * cx1, c0 * cy1]));
                 }
-                (U(U::CONST([cx0, cy0])), U(U::CONST([cx1, cy1]))) => {
-                    out = U(U::CONST([cx0 * cx1, cy0 * cy1]));
+                (UO(UO::CONST([cx0, cy0])), UO(UO::CONST([cx1, cy1]))) => {
+                    out = UO(UO::CONST([cx0 * cx1, cy0 * cy1]));
                 }
-                (op1 @ (F(F::CONST(_)) | U(U::CONST(_))), op2 @ _) => {
+                (op1 @ (FO(FO::CONST(_)) | UO(UO::CONST(_))), op2 @ _) => {
                     const_out = op1;
                     out = op2;
                 }
-                (F(fop0), F(fop1)) => {
-                    out = F(F::MUL(fop0.to_ficv(self), fop1.to_ficv(self)));
+                (FO(fop0), FO(fop1)) => {
+                    out = FO(FO::MUL(fop0.to_ficv(self), fop1.to_ficv(self)));
                 }
-                (F(fop0), U(uop1)) => {
-                    out = U(U::MUL(fop0.to_uicv(self), uop1.to_uicv(self)));
+                (FO(fop0), UO(uop1)) => {
+                    out = UO(UO::MUL(fop0.to_ficv(self).into(), uop1.to_uicv(self)));
                 }
-                (U(uop0), U(uop1)) => {
-                    out = U(U::MUL(uop0.to_uicv(self), uop1.to_uicv(self)));
+                (UO(uop0), UO(uop1)) => {
+                    out = UO(UO::MUL(uop0.to_uicv(self), uop1.to_uicv(self)));
                 }
                 _ => unreachable!(), //because of sorting
             }
         }
         match (const_out, out) {
-            (F(F::CONST(1.0)) | U(U::CONST([1.0, 1.0])), op1 @ _) => op1,
-            (F(fop0), F(fop1)) => F(F::MUL(fop0.to_ficv(self), fop1.to_ficv(self))),
-            (op0 @ (F(_) | U(_)), op1 @ (F(_) | U(_))) => {
-                U(U::MUL(op0.to_uicv(self), op1.to_uicv(self)))
-            } // (U(fop0), F(uop1)) => U(U::MUL(fop0.to_uicv(self), uop1.to_uicv(self))),
-              // (U(uop0), U(uop1)) => U(U::MUL(uop0.to_uicv(self), uop1.to_uicv(self))),
+            (FO(FO::CONST(1.0)) | UO(UO::CONST([1.0, 1.0])), op1 @ _) => op1,
+            (FO(fop0), FO(fop1)) => FO(FO::MUL(fop0.to_ficv(self), fop1.to_ficv(self))),
+            (op0 @ (FO(_) | UO(_)), op1 @ (FO(_) | UO(_))) => UO(UO::MUL(
+                op0.to_icv(self).try_into().unwrap(),
+                op1.to_icv(self).try_into().unwrap(),
+            )), // (UO(fop0), FO(uop1)) => UO(UO::MUL(fop0.to_uicv(self), uop1.to_uicv(self))),
+                // (UO(uop0), UO(uop1)) => UO(UO::MUL(uop0.to_uicv(self), uop1.to_uicv(self))),
         }
     }
 
     #[inline]
     fn compile_add(&mut self, sorted_ops: Vec<OP<M>>) -> OP<M> {
-        let mut const_out = F(F::CONST(0.0));
-        let mut out = F(F::CONST(0.0));
+        let mut const_out = FO(FO::CONST(0.0));
+        let mut out = FO(FO::CONST(0.0));
         // println!("SORTED {:?}", &sorted_ops);
         for op in sorted_ops {
             // println!("!!!!!!!! {:?} {:?}", &out, &op);
             match (out, op) {
-                (F(F::CONST(c0)), F(F::CONST(c1))) => {
-                    out = F(F::CONST(c0 + c1));
+                (FO(FO::CONST(c0)), FO(FO::CONST(c1))) => {
+                    out = FO(FO::CONST(c0 + c1));
                 }
-                (F(F::CONST(c0)), U(U::CONST([cx1, cy1]))) => {
-                    out = U(U::CONST([c0 + cx1, c0 + cy1]));
+                (FO(FO::CONST(c0)), UO(UO::CONST([cx1, cy1]))) => {
+                    out = UO(UO::CONST([c0 + cx1, c0 + cy1]));
                 }
-                (U(U::CONST([cx0, cy0])), U(U::CONST([cx1, cy1]))) => {
-                    out = U(U::CONST([cx0 + cx1, cy0 + cy1]));
+                (UO(UO::CONST([cx0, cy0])), UO(UO::CONST([cx1, cy1]))) => {
+                    out = UO(UO::CONST([cx0 + cx1, cy0 + cy1]));
                 }
-                (op1 @ (F(F::CONST(_)) | U(U::CONST(_))), op2 @ _) => {
+                (op1 @ (FO(FO::CONST(_)) | UO(UO::CONST(_))), op2 @ _) => {
                     const_out = op1;
                     out = op2;
                 }
-                (F(fop0), F(fop1)) => {
-                    out = F(F::ADD(fop0.to_ficv(self), fop1.to_ficv(self)));
+                (FO(fop0), FO(fop1)) => {
+                    out = FO(FO::ADD(fop0.to_ficv(self), fop1.to_ficv(self)));
                 }
-                (F(fop0), U(uop1)) => {
-                    out = U(U::ADD(fop0.to_uicv(self), uop1.to_uicv(self)));
+                (FO(fop0), UO(uop1)) => {
+                    out = UO(UO::ADD(fop0.to_ficv(self).into(), uop1.to_uicv(self)));
                 }
-                (U(uop0), U(uop1)) => {
-                    out = U(U::ADD(uop0.to_uicv(self), uop1.to_uicv(self)));
+                (UO(uop0), UO(uop1)) => {
+                    out = UO(UO::ADD(uop0.to_uicv(self), uop1.to_uicv(self)));
                 }
                 _ => unreachable!(), //because of sorting
             }
         }
         match (const_out, out) {
-            (F(F::CONST(0.0)) | U(U::CONST([0.0, 0.0])), op1 @ _) => op1,
-            (F(fop0), F(fop1)) => F(F::ADD(fop0.to_ficv(self), fop1.to_ficv(self))),
-            (op0 @ (F(_) | U(_)), op1 @ (F(_) | U(_))) => {
-                U(U::ADD(op0.to_uicv(self), op1.to_uicv(self)))
-            } // (F(fop0), U(uop1)) => U(U::ADD(fop0.to_uicv(self), uop1.to_uicv(self))),
-              // (U(fop0), F(uop1)) => U(U::ADD(fop0.to_uicv(self), uop1.to_uicv(self))),
-              // (U(uop0), U(uop1)) => U(U::ADD(uop0.to_uicv(self), uop1.to_uicv(self))),
+            (FO(FO::CONST(0.0)) | UO(UO::CONST([0.0, 0.0])), op1 @ _) => op1,
+            (FO(fop0), FO(fop1)) => FO(FO::ADD(fop0.to_ficv(self), fop1.to_ficv(self))),
+            (op0 @ (FO(_) | UO(_)), op1 @ (FO(_) | UO(_))) => UO(UO::ADD(
+                op0.to_icv(self).try_into().unwrap(),
+                op1.to_icv(self).try_into().unwrap(),
+            )), // (FO(fop0), UO(uop1)) => UO(UO::ADD(fop0.to_uicv(self), uop1.to_uicv(self))),
+                // (UO(fop0), FO(uop1)) => UO(UO::ADD(fop0.to_uicv(self), uop1.to_uicv(self))),
+                // (UO(uop0), UO(uop1)) => UO(UO::ADD(uop0.to_uicv(self), uop1.to_uicv(self))),
         }
     }
 
-    fn push_fadd_leaf(&mut self, ops: &mut Vec<OP<M>>, icv: FICV) {
+    fn push_fadd_leaf(&mut self, ops: &mut Vec<OP<M>>, icv: F) {
         // Take 'r' before 'l' for a chance for more efficient memory usage:
         match icv {
-            FICV::I(_) => {
+            F::I(_) => {
                 let op = self.pop();
                 match op {
-                    F(F::ADD(l, r)) => {
+                    FO(FO::ADD(l, r)) => {
                         self.push_fadd_leaf(ops, r);
                         self.push_fadd_leaf(ops, l);
                     }
-                    U(U::ADD(l, r)) => {
+                    UO(UO::ADD(l, r)) => {
                         self.push_uadd_leaf(ops, r);
                         self.push_uadd_leaf(ops, l);
                     }
@@ -386,21 +401,21 @@ impl<M: Module> CExpr<M> {
                     }
                 }
             }
-            FICV::CONST(c) => ops.push(F(F::CONST(c))),
-            FICV::VAR(v) => ops.push(F(F::VAR(v))),
+            F::CONST(c) => ops.push(FO(FO::CONST(c))),
+            F::VAR(v) => ops.push(FO(FO::VAR(v))),
         };
     }
-    fn push_uadd_leaf(&mut self, ops: &mut Vec<OP<M>>, icv: UICV) {
+    fn push_uadd_leaf(&mut self, ops: &mut Vec<OP<M>>, icv: U) {
         // Take 'r' before 'l' for a chance for more efficient memory usage:
         match icv {
-            UICV::I(_) => {
+            U::I(_) => {
                 let op = self.pop();
                 match op {
-                    U(U::ADD(l, r)) => {
+                    UO(UO::ADD(l, r)) => {
                         self.push_uadd_leaf(ops, r);
                         self.push_uadd_leaf(ops, l);
                     }
-                    F(F::ADD(l, r)) => {
+                    FO(FO::ADD(l, r)) => {
                         self.push_fadd_leaf(ops, r);
                         self.push_fadd_leaf(ops, l);
                     }
@@ -409,23 +424,23 @@ impl<M: Module> CExpr<M> {
                     }
                 }
             }
-            // UICV::FROM(ficv) => self.push_fadd_leaf(ops, ficv),
-            UICV::CONST(c) => ops.push(U(U::CONST(c))),
-            UICV::VAR(v) => ops.push(U(U::VAR(v))),
+            U::F(ficv) => self.push_fadd_leaf(ops, ficv),
+            U::CONST(c) => ops.push(UO(UO::CONST(c))),
+            U::VAR(v) => ops.push(UO(UO::VAR(v))),
         };
     }
 
-    fn push_fmul_leaf(&mut self, ops: &mut Vec<OP<M>>, icv: FICV) {
+    fn push_fmul_leaf(&mut self, ops: &mut Vec<OP<M>>, icv: F) {
         // Take 'r' before 'l' for a chance for more efficient memory usage:
         match icv {
-            FICV::I(_) => {
+            F::I(_) => {
                 let op = self.pop();
                 match op {
-                    F(F::MUL(l, r)) => {
+                    FO(FO::MUL(l, r)) => {
                         self.push_fmul_leaf(ops, r);
                         self.push_fmul_leaf(ops, l);
                     }
-                    U(U::MUL(l, r)) => {
+                    UO(UO::MUL(l, r)) => {
                         self.push_umul_leaf(ops, r);
                         self.push_umul_leaf(ops, l);
                     }
@@ -434,22 +449,22 @@ impl<M: Module> CExpr<M> {
                     }
                 }
             }
-            FICV::CONST(c) => ops.push(F(F::CONST(c))),
-            FICV::VAR(v) => ops.push(F(F::VAR(v))),
+            F::CONST(c) => ops.push(FO(FO::CONST(c))),
+            F::VAR(v) => ops.push(FO(FO::VAR(v))),
         };
     }
 
-    fn push_umul_leaf(&mut self, ops: &mut Vec<OP<M>>, icv: UICV) {
+    fn push_umul_leaf(&mut self, ops: &mut Vec<OP<M>>, icv: U) {
         // Take 'r' before 'l' for a chance for more efficient memory usage:
         match icv {
-            UICV::I(_) => {
+            U::I(_) => {
                 let op = self.pop();
                 match op {
-                    U(U::MUL(l, r)) => {
+                    UO(UO::MUL(l, r)) => {
                         self.push_umul_leaf(ops, r);
                         self.push_umul_leaf(ops, l);
                     }
-                    F(F::MUL(l, r)) => {
+                    FO(FO::MUL(l, r)) => {
                         self.push_fmul_leaf(ops, r);
                         self.push_fmul_leaf(ops, l);
                     }
@@ -458,9 +473,9 @@ impl<M: Module> CExpr<M> {
                     }
                 }
             }
-            // UICV::FROM(ficv) => self.push_fmul_leaf(ops, ficv),
-            UICV::CONST(c) => ops.push(U(U::CONST(c))),
-            UICV::VAR(v) => ops.push(U(U::VAR(v))),
+            U::F(ficv) => self.push_fmul_leaf(ops, ficv),
+            U::CONST(c) => ops.push(UO(UO::CONST(c))),
+            U::VAR(v) => ops.push(UO(UO::VAR(v))),
         };
     }
 }
@@ -560,15 +575,15 @@ impl<M: Module> Compiler<M> for ExprSlice<'_> {
             // for (i, op) in ops.into_iter().enumerate() {
             //     let instr = xss.get(i + 1).unwrap().compile(ast, cexpr)?;
 
-            //     if let FICV(FCONST(l)) = out {
-            //         if let FICV(FCONST(r)) = instr {
+            //     if let F(FCONST(l)) = out {
+            //         if let F(FCONST(r)) = instr {
             //             out = match op {
-            //                 EQ => FICV(FCONST((l == r).into())),
-            //                 NE => FICV(FCONST((l != r).into())),
-            //                 LT => FICV(FCONST((l < r).into())),
-            //                 GT => FICV(FCONST((l > r).into())),
-            //                 LTE => FICV(FCONST((l <= r).into())),
-            //                 GTE => FICV(FCONST((l >= r).into())),
+            //                 EQ => F(FCONST((l == r).into())),
+            //                 NE => F(FCONST((l != r).into())),
+            //                 LT => F(FCONST((l < r).into())),
+            //                 GT => F(FCONST((l > r).into())),
+            //                 LTE => F(FCONST((l <= r).into())),
+            //                 GTE => F(FCONST((l >= r).into())),
             //                 _ => unreachable!(),
             //             };
             //             continue;
@@ -593,18 +608,18 @@ impl<M: Module> Compiler<M> for ExprSlice<'_> {
                 unimplemented!();
                 // let mut xss = Vec::<ExprSlice>::with_capacity(4);
                 // self.split(Or, &mut xss);
-                // let mut out = FICV(FCONST(0.0));
+                // let mut out = F(FCONST(0.0));
                 // let mut out_set = false;
                 // for xs in xss.iter() {
                 //     let instr = xs.compile(ast, cexpr)?;
                 //     if out_set {
                 //         out = FOR(cexpr.instr_to_arg(out), cexpr.instr_to_arg(instr));
                 //     } else {
-                //         if let FICV(FCONST(c)) = instr {
+                //         if let F(FCONST(c)) = instr {
                 //             if c != 0.0 {
                 //                 return Ok(instr);
                 //             }
-                //             // out = instr;     // Skip this 0 value (mostly so F don't complicate my logic in 'if out_set' since F can assume that any set value is non-const).
+                //             // out = instr;     // Skip this 0 value (mostly so FO don't complicate my logic in 'if out_set' since FO can assume that any set value is non-const).
                 //             // out_set = true;
                 //         } else {
                 //             out = instr;
@@ -619,17 +634,17 @@ impl<M: Module> Compiler<M> for ExprSlice<'_> {
                 unimplemented!();
                 // let mut xss = Vec::<ExprSlice>::with_capacity(4);
                 // self.split(And, &mut xss);
-                // let mut out = FICV(FCONST(1.0));
+                // let mut out = F(FCONST(1.0));
                 // let mut out_set = false;
                 // for xs in xss.iter() {
                 //     let instr = xs.compile(ast, cexpr)?;
-                //     if let FICV(FCONST(c)) = instr {
+                //     if let F(FCONST(c)) = instr {
                 //         if c == 0.0 {
                 //             return Ok(instr);
                 //         }
                 //     }
                 //     if out_set {
-                //         if let FICV(FCONST(_)) = out {
+                //         if let F(FCONST(_)) = out {
                 //             // If we get here, we know that the const is non-zero.
                 //             out = instr;
                 //         } else {
@@ -650,11 +665,11 @@ impl<M: Module> Compiler<M> for ExprSlice<'_> {
                 for xs in xss {
                     let op = xs.compile(ast, cexpr, module)?;
                     match op {
-                        F(F::ADD(licv, ricv)) => {
+                        FO(FO::ADD(licv, ricv)) => {
                             cexpr.push_fadd_leaf(&mut ops, ricv);
                             cexpr.push_fadd_leaf(&mut ops, licv);
                         }
-                        U(U::ADD(licv, ricv)) => {
+                        UO(UO::ADD(licv, ricv)) => {
                             cexpr.push_uadd_leaf(&mut ops, ricv);
                             cexpr.push_uadd_leaf(&mut ops, licv);
                         }
@@ -692,11 +707,11 @@ impl<M: Module> Compiler<M> for ExprSlice<'_> {
                 for xs in xss {
                     let op = xs.compile(ast, cexpr, module)?;
                     match op {
-                        F(F::MUL(licv, ricv)) => {
+                        FO(FO::MUL(licv, ricv)) => {
                             cexpr.push_fmul_leaf(&mut ops, ricv);
                             cexpr.push_fmul_leaf(&mut ops, licv);
                         }
-                        U(U::MUL(licv, ricv)) => {
+                        UO(UO::MUL(licv, ricv)) => {
                             cexpr.push_umul_leaf(&mut ops, ricv);
                             cexpr.push_umul_leaf(&mut ops, licv);
                         }
@@ -726,64 +741,65 @@ impl<M: Module> Compiler<M> for ExprSlice<'_> {
                 Ok(cexpr.compile_mul(ops))
             }
 
-            Mod => {
+            Rem => {
                 let mut xss = Vec::<ExprSlice>::with_capacity(2);
-                self.split(Mod, &mut xss);
-                let mut out = F(F::CONST(0.0));
+                self.split(Rem, &mut xss);
+                let mut out = FO(FO::CONST(0.0));
                 let mut out_set = false;
                 for xs in xss.iter() {
                     let op = xs.compile(ast, cexpr, module)?;
-                    if out_set {
-                        match (out, op) {
+                    out = if out_set {
+                        let licv = out.to_icv(cexpr);
+                        let ricv = op.to_icv(cexpr);
+                        match (licv, ricv) {
                             (F(F::CONST(dividend)), F(F::CONST(divisor))) => {
-                                out = F(F::CONST(f64::rem(dividend, divisor)));
+                                FO(FO::CONST(f64::rem(dividend, divisor)))
                             }
-                            (F(divisor), F(dividend)) => {
-                                out = F(F::MOD(dividend.to_ficv(cexpr), divisor.to_ficv(cexpr)));
-                            }
-                            (divisor @ (F(_) | U(_)), dividend @ (U(_) | F(_))) => {
-                                let dividend = dividend.to_uicv(cexpr);
-                                let divisor = divisor.to_uicv(cexpr);
-                                out = U(match (dividend, divisor) {
-                                    (UICV::CONST(dividend), UICV::CONST(divisor)) => {
-                                        U::CONST(map2!(f64::rem, dividend, divisor))
+                            (F(lficv), F(rficv)) => FO(FO::REM(lficv, rficv)),
+                            (licv @ (F(_) | U(_)), ricv @ (U(_) | F(_))) => {
+                                let luicv = licv.try_into().unwrap();
+                                let ruicv = ricv.try_into().unwrap();
+                                UO(match (luicv, ruicv) {
+                                    (U::CONST(dividend), U::CONST(divisor)) => {
+                                        UO::CONST(<[f64; 2]>::rem(dividend, divisor))
                                     }
-                                    _ => U::MOD(dividend, divisor),
-                                });
+                                    _ => UO::REM(luicv, ruicv),
+                                })
                             }
+                            _ => unreachable!(),
                         }
                     } else {
-                        out = op;
                         out_set = true;
-                    }
+                        op
+                    };
                 }
                 Ok(out)
             }
             Exp => {
                 let mut xss = Vec::<ExprSlice>::with_capacity(2);
                 self.split(Exp, &mut xss);
-                let mut out = F(F::CONST(0.0));
+                let mut out = FO(FO::CONST(0.0));
                 let mut out_set = false;
                 // Right-to-Left Associativity
                 for xs in xss.into_iter().rev() {
                     let op = xs.compile(ast, cexpr, module)?;
                     if out_set {
                         match (out, op) {
-                            (F(F::CONST(power)), F(F::CONST(base))) => {
-                                out = F(F::CONST(base.powf(power)));
+                            (FO(FO::CONST(power)), FO(FO::CONST(base))) => {
+                                out = FO(FO::CONST(base.powf(power)));
                             }
-                            (F(power), F(base)) => {
-                                out = F(F::EXP(base.to_ficv(cexpr), power.to_ficv(cexpr)));
+                            (FO(power), FO(base)) => {
+                                out = FO(FO::EXP(base.to_ficv(cexpr), power.to_ficv(cexpr)));
                             }
-                            (power @ (F(_) | U(_)), base @ (U(_) | F(_))) => {
-                                let base = base.to_uicv(cexpr);
-                                let power = power.to_uicv(cexpr);
+                            (power @ (FO(_) | UO(_)), base @ (UO(_) | FO(_))) => {
+                                let base = base.to_icv(cexpr).try_into().unwrap();
+                                let power = power.to_icv(cexpr).try_into().unwrap();
 
-                                out = U(match (base, power) {
-                                    (UICV::CONST(base), UICV::CONST(power)) => {
-                                        U::CONST(map2!(f64::pow, base, power))
+                                out = UO(match (base, power) {
+                                    (U::CONST(base), U::CONST(power)) => {
+                                        UO::CONST(<[f64; 2]>::pow(base, power))
                                     }
-                                    _ => U::EXP(base, power),
+                                    _ => UO::EXP(base, power),
                                 });
                             }
                         }
@@ -826,16 +842,22 @@ impl<M: Module> Compiler<M> for UnaryOp {
 impl<M: Module> Compiler<M> for ECV {
     fn compile(&self, ast: &Ast, cexpr: &mut CExpr<M>, module: &M) -> Result<OP<M>, Error> {
         match self {
-            Const(c) => Ok(F(F::CONST(*c))),
+            Const(c) => Ok(FO(FO::CONST(*c))),
             Var(name) => {
-                if let Some(op) = module.var(name) {
-                    Ok(op)
+                if let Some(op) = module.dispatch_var(name) {
+                    match op {
+                        F(F::CONST(c)) => Ok(FO(FO::CONST(*c))),
+                        F(F::VAR(v)) => Ok(FO(FO::VAR(*v))),
+                        U(U::CONST(c)) => Ok(UO(UO::CONST(*c))),
+                        U(U::VAR(v)) => Ok(UO(UO::VAR(*v))),
+                        _ => Err(Error::Undefined(name.to_owned())),
+                    }
                 } else {
                     match name.as_str() {
                         // builtins constants
-                        "PI" => Ok(F(F::CONST(f64::PI))),
-                        "E" => Ok(F(F::CONST(f64::E))),
-                        "EPS" => Ok(F(F::CONST(f64::EPSILON))),
+                        "PI" => Ok(FO(FO::CONST(f64::PI))),
+                        "E" => Ok(FO(FO::CONST(f64::E))),
+                        "EPS" => Ok(FO(FO::CONST(f64::EPSILON))),
                         _ => Err(Error::Undefined(name.to_owned())),
                     }
                 }
@@ -851,22 +873,36 @@ impl<M: Module> Compiler<M> for Value {
             ECV(ecv) => ecv.compile(ast, cexpr, module),
             UnaryOp(u) => u.compile(ast, cexpr, module),
             Func(name, sarg, eargs) => {
-                match (name.as_str(), sarg.as_ref(), eargs.as_slice()) {
-                    _ => unimplemented!(),
+                let mut args = if let Some(s) = sarg {
+                    let mut args = Vec::with_capacity(eargs.len() + 1);
+                    args.push(s.clone().into());
+                    args
+                } else {
+                    Vec::with_capacity(eargs.len())
+                };
+
+                for earg in eargs {
+                    let op = earg.compile(ast, cexpr, module)?;
+                    let arg = op.to_icv(cexpr);
+                    args.push(arg);
+                }
+                match module.dispatch_func(&name, &args) {
+                    Some(op) => Ok(op),
+                    _ => Err(Error::Undefined(name.to_owned())),
                 }
                 // ("if", None, [cond, then, else_]) => {
                 //     let cond = cond.compile(ast, cexpr)?;
                 //     let then = then.compile(ast, cexpr)?;
                 //     let else_ = else_.compile(ast, cexpr)?;
                 //     match (cond, then, else_) {
-                //         (F(F::CONST(0.0)), _, a2) => Ok(a2),
-                //         (F(F::CONST(_)), a1, _) => Ok(a1),
-                //         (F(cond), F(a1), F(a2)) => Ok(F(FIF(
+                //         (FO(FO::CONST(0.0)), _, a2) => Ok(a2),
+                //         (FO(FO::CONST(_)), a1, _) => Ok(a1),
+                //         (FO(cond), FO(a1), FO(a2)) => Ok(FO(FIF(
                 //             cond.to_icv(cexpr),
                 //             a1.to_icv(cexpr),
                 //             a2.to_icv(cexpr),
                 //         ))),
-                //         (F(cond), U(a1), U(a2)) => Ok(U(UIF(
+                //         (FO(cond), UO(a1), UO(a2)) => Ok(UO(UIF(
                 //             cond.to_icv(cexpr),
                 //             a1.to_icv(cexpr),
                 //             a2.to_icv(cexpr),
@@ -891,11 +927,11 @@ impl<M: Module> Compiler<M> for Value {
                 //}
             }
             List(vals) => match &vals.as_slice() {
-                &[ECV::Const(cx), ECV::Const(cy)] => Ok(U(U::CONST([*cx, *cy]))),
+                &[ECV::Const(cx), ECV::Const(cy)] => Ok(UO(UO::CONST([*cx, *cy]))),
                 &[x, y] => {
-                    let x: F<M::FFN> = x.compile(ast, cexpr, module)?.try_into()?;
-                    let y: F<M::FFN> = y.compile(ast, cexpr, module)?.try_into()?;
-                    Ok(U(U::SET(x.to_ficv(cexpr), y.to_ficv(cexpr))))
+                    let x: FO<M::FFN> = x.compile(ast, cexpr, module)?.try_into()?;
+                    let y: FO<M::FFN> = y.compile(ast, cexpr, module)?.try_into()?;
+                    Ok(UO(UO::SET(x.to_ficv(cexpr), y.to_ficv(cexpr))))
                 }
                 _ => Err(Error::InvalidSyntax(
                     "The vector must be 2 to 3 elements long".into(),

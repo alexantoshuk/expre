@@ -1,83 +1,117 @@
 use crate::error::Error;
-use crate::map;
 
 // use bytemuck::bytes_of;
 use gxhash::GxHasher;
 use std::fmt::{self, Debug};
 use std::hash::{Hash, Hasher};
 
+impl From<f64> for F {
+    fn from(value: f64) -> Self {
+        Self::CONST(value)
+    }
+}
+
+impl From<[f64; 2]> for U {
+    fn from(value: [f64; 2]) -> Self {
+        Self::CONST(value)
+    }
+}
+impl From<f64> for U {
+    fn from(value: f64) -> Self {
+        Self::CONST([value; 2])
+    }
+}
+
+pub fn fvar(id: usize) -> F {
+    F::VAR(id)
+}
+
+pub fn uvar(id: usize) -> U {
+    U::VAR(id)
+}
+
 #[derive(Debug, Clone)]
 pub enum ICV {
-    FICV(FICV),
-    UICV(UICV),
+    F(F),
+    U(U),
+    S(String),
 }
 
 pub(crate) use crate::ops::ICV::*;
 
-impl From<FICV> for ICV {
+impl From<F> for ICV {
     #[inline]
-    fn from(value: FICV) -> Self {
-        Self::FICV(value)
+    fn from(value: F) -> Self {
+        Self::F(value)
     }
 }
 
-impl From<UICV> for ICV {
+impl From<U> for ICV {
     #[inline]
-    fn from(value: UICV) -> Self {
-        Self::UICV(value)
+    fn from(value: U) -> Self {
+        Self::U(value)
+    }
+}
+
+impl From<String> for ICV {
+    #[inline]
+    fn from(value: String) -> Self {
+        Self::S(value)
+    }
+}
+
+impl TryFrom<ICV> for f64 {
+    type Error = Error;
+    #[inline]
+    fn try_from(value: ICV) -> Result<Self, Self::Error> {
+        match value {
+            F(F::CONST(c)) => Ok(c),
+            _ => Err(Error::InvalidType("Ivalid type".into())),
+        }
+    }
+}
+
+impl TryFrom<ICV> for [f64; 2] {
+    type Error = Error;
+    #[inline]
+    fn try_from(value: ICV) -> Result<Self, Self::Error> {
+        match value {
+            F(F::CONST(c)) => Ok([c; 2]),
+            U(U::CONST(c)) => Ok(c),
+            _ => Err(Error::InvalidType("Ivalid type".into())),
+        }
     }
 }
 
 #[derive(Debug, Clone, PartialEq, Eq, Hash)]
 pub enum OP<FFN, UFN> {
-    F(F<FFN>),
-    U(U<UFN>),
+    FO(FO<FFN>),
+    UO(UO<UFN>),
 }
 
 pub(crate) use crate::ops::OP::*;
 
-impl<FFN, UFN> From<F<FFN>> for OP<FFN, UFN> {
-    fn from(value: F<FFN>) -> Self {
-        Self::F(value)
+impl<FFN, UFN> From<FO<FFN>> for OP<FFN, UFN> {
+    fn from(value: FO<FFN>) -> Self {
+        Self::FO(value)
     }
 }
 
-impl<FFN, UFN> From<U<UFN>> for OP<FFN, UFN> {
-    fn from(value: U<UFN>) -> Self {
-        Self::U(value)
+impl<FFN, UFN> From<UO<UFN>> for OP<FFN, UFN> {
+    fn from(value: UO<UFN>) -> Self {
+        Self::UO(value)
     }
 }
 
-impl<FFN, UFN> TryFrom<OP<FFN, UFN>> for F<FFN> {
-    type Error = Error;
-    #[inline]
-    fn try_from(value: OP<FFN, UFN>) -> Result<Self, Self::Error> {
-        match value {
-            OP::F(fop) => Ok(fop),
-            _ => Err(Error::InvalidType("Ivalid type".into())),
-        }
-    }
-}
-
-impl<FFN, UFN> TryFrom<OP<FFN, UFN>> for U<UFN> {
-    type Error = Error;
-    #[inline]
-    fn try_from(value: OP<FFN, UFN>) -> Result<Self, Self::Error> {
-        match value {
-            OP::U(uop) => Ok(uop),
-            _ => Err(Error::InvalidType("Ivalid type".into())),
-        }
-    }
-}
 impl<FFN, UFN> OP<FFN, UFN> {
     #[inline]
     fn order(&self) -> u32 {
         match self {
-            Self::F(F::CONST(_)) => 1,
-            Self::U(U::CONST(_)) => 2,
+            Self::FO(FO::CONST(_)) => 1,
+            Self::UO(UO::CONST(_)) => 2,
 
-            Self::F(_) => 10,
-            Self::U(_) => 11,
+            Self::FO(_) => 10,
+            Self::UO(_) => 11,
         }
     }
 
@@ -101,11 +135,11 @@ impl<FFN, UFN> OP<FFN, UFN> {
 //     #[inline]
 //     fn hash<H: Hasher>(&self, state: &mut H) {
 //         match self {
-//             Self::F(op) => {
+//             Self::FO(op) => {
 //                 state.write_u8(1);
 //                 op.hash(state);
 //             }
-//             Self::U(op) => {
+//             Self::UO(op) => {
 //                 state.write_u8(2);
 //                 op.hash(state);
 //             }
@@ -114,29 +148,52 @@ impl<FFN, UFN> OP<FFN, UFN> {
 // }
 
 ///////////////////////////////////////////////////////////////////////////////////////////////////////////////////
-/// OPS that return scalar T type aka F
+/// OPS that return scalar T type aka FO
 ///////////////////////////////////////////////////////////////////////////////////////////////////////////////////
 pub type FCONST = f64;
 
 #[derive(Clone, Copy)]
-pub enum FICV {
+pub enum F {
     I(usize),
     CONST(FCONST),
     VAR(usize),
 }
 
-// impl From<UICV> for FICV {
-//     fn from(value: UICV) -> Self {
+impl TryFrom<ICV> for F {
+    type Error = Error;
+    #[inline]
+    fn try_from(value: ICV) -> Result<Self, Self::Error> {
+        match value {
+            F(ficv) => Ok(ficv),
+            U(U::F(ficv)) => Ok(ficv),
+            _ => Err(Error::InvalidType("Ivalid type".into())),
+        }
+    }
+}
+
+impl TryFrom<U> for F {
+    type Error = Error;
+    #[inline]
+    fn try_from(value: U) -> Result<Self, Self::Error> {
+        match value {
+            U::F(ficv) => Ok(ficv),
+            _ => Err(Error::InvalidType("Ivalid type".into())),
+        }
+    }
+}
+
+// impl From<U> for F {
+//     fn from(value: U) -> Self {
 //         match value {
-//             UICV::CONST([x,y]) => Self::CONST(x),
-//             UICV::FROM(ficv) => ficv,
-//             UICV::VAR(id) => Self::VAR(id),
+//             U::CONST([x,y]) => Self::CONST(x),
+//             U::FROM(ficv) => ficv,
+//             U::VAR(id) => Self::VAR(id),
 //             _ => Self::FROM(value),
 //         }
 //     }
 // }
 
-impl Debug for FICV {
+impl Debug for F {
     fn fmt(&self, f: &mut fmt::Formatter) -> Result<(), fmt::Error> {
         match self {
             Self::I(i) => write!(f, "@{:?}", i),
@@ -146,7 +203,7 @@ impl Debug for FICV {
     }
 }
 
-impl Hash for FICV {
+impl Hash for F {
     #[inline]
     fn hash<H: Hasher>(&self, state: &mut H) {
         match self {
@@ -166,7 +223,7 @@ impl Hash for FICV {
     }
 }
 
-impl PartialEq for FICV {
+impl PartialEq for F {
     #[inline]
     fn eq(&self, other: &Self) -> bool {
         match (self, other) {
@@ -178,48 +235,70 @@ impl PartialEq for FICV {
     }
 }
 
-impl Eq for FICV {}
+impl Eq for F {}
 
+// #[derive(Debug, Clone)]
+// pub enum OPP {
+//     //---- Primitive Value Types:
+//     CONST(FCONST),
+//     VAR(usize),
+
+//     //---- Unary Ops:
+//     NEG(Type, ICV),
+//     NOT(Type, ICV),
+//     INV(Type, ICV),
+
+//     //---- Binary Math Ops:
+//     ADD(Type, ICV, ICV),
+// }
 #[derive(Debug, Clone)]
-pub enum F<FFN> {
+pub enum FO<FFN> {
     //---- Primitive Value Types:
     CONST(FCONST),
     VAR(usize),
 
     //---- Unary Ops:
-    NEG(FICV),
-    NOT(FICV),
-    INV(FICV),
+    NEG(F),
+    NOT(F),
+    INV(F),
 
     //---- Binary Math Ops:
-    ADD(FICV, FICV),
-
+    ADD(F, F),
     // A Sub(x) is converted to an FADD(FNEG(x)).
-    MUL(FICV, FICV),
+    MUL(F, F),
     // A Div(n,d) is converted to a FMUL(n,FINV(d)).
-    MOD(FICV, FICV),
-
-    EXP(FICV, FICV),
+    REM(F, F),
+    EXP(F, F),
 
     //---- Equality Ops:
-    EQ(FICV, FICV),
-    NE(FICV, FICV),
+    EQ(F, F),
+    NE(F, F),
 
     //---- Comparison Ops:
-    LT(FICV, FICV),
-    LTE(FICV, FICV),
-    GTE(FICV, FICV),
-    GT(FICV, FICV),
+    LT(F, F),
+    LTE(F, F),
+    GTE(F, F),
+    GT(F, F),
 
     //---- Binary Logic Ops:
-    OR(FICV, FICV),
-    AND(FICV, FICV),
+    OR(F, F),
+    AND(F, F),
     //---- Functions:
-    // STDFN(FFN),
     FN(FFN),
 }
 
-impl<FFN: PartialEq> PartialEq for F<FFN> {
+impl<FFN, UFN> TryFrom<OP<FFN, UFN>> for FO<FFN> {
+    type Error = Error;
+    #[inline]
+    fn try_from(value: OP<FFN, UFN>) -> Result<Self, Self::Error> {
+        match value {
+            OP::FO(fop) => Ok(fop),
+            _ => Err(Error::InvalidType("Ivalid type".into())),
+        }
+    }
+}
+
+impl<FFN: PartialEq> PartialEq for FO<FFN> {
     #[inline]
     fn eq(&self, other: &Self) -> bool {
         match (self, other) {
@@ -230,7 +309,7 @@ impl<FFN: PartialEq> PartialEq for F<FFN> {
             (Self::NEG(s), Self::NEG(o)) => s == o,
             (Self::NOT(s), Self::NOT(o)) => s == o,
             (Self::INV(s), Self::INV(o)) => s == o,
-            (Self::MOD(s0, s1), Self::MOD(o0, o1)) => (s0, s1) == (o0, o1),
+            (Self::REM(s0, s1), Self::REM(o0, o1)) => (s0, s1) == (o0, o1),
             (Self::EXP(s0, s1), Self::EXP(o0, o1)) => (s0, s1) == (o0, o1),
             (Self::LT(s0, s1), Self::LT(o0, o1)) => (s0, s1) == (o0, o1),
             (Self::LTE(s0, s1), Self::LTE(o0, o1)) => (s0, s1) == (o0, o1),
@@ -240,16 +319,15 @@ impl<FFN: PartialEq> PartialEq for F<FFN> {
             (Self::GTE(s0, s1), Self::GTE(o0, o1)) => (s0, s1) == (o0, o1),
             (Self::OR(s0, s1), Self::OR(o0, o1)) => (s0, s1) == (o0, o1) || (s0, s1) == (o1, o0),
             (Self::AND(s0, s1), Self::AND(o0, o1)) => (s0, s1) == (o0, o1) || (s0, s1) == (o1, o0),
-            // (Self::STDFN(s), Self::STDFN(o)) => s == o,
             (Self::FN(s), Self::FN(o)) => s == o,
             _ => false,
         }
     }
 }
 
-impl<FFN: PartialEq> Eq for F<FFN> {}
+impl<FFN: PartialEq> Eq for FO<FFN> {}
 
-impl<FFN: Hash> Hash for F<FFN> {
+impl<FFN: Hash> Hash for FO<FFN> {
     #[inline]
     fn hash<H: Hasher>(&self, state: &mut H) {
         match self {
@@ -281,7 +359,7 @@ impl<FFN: Hash> Hash for F<FFN> {
                 state.write_u8(8);
                 state.write_u64(_hash(a0) ^ _hash(a1));
             }
-            Self::MOD(a0, a1) => {
+            Self::REM(a0, a1) => {
                 state.write_u8(9);
                 a0.hash(state);
                 a1.hash(state);
@@ -327,10 +405,6 @@ impl<FFN: Hash> Hash for F<FFN> {
                 state.write_u8(18);
                 state.write_u64(_hash(a0) ^ _hash(a1));
             }
-            // Self::STDFN(ffn) => {
-            //     state.write_u8(19);
-            //     ffn.hash(state);
-            // }
             Self::FN(ffn) => {
                 state.write_u8(20);
                 ffn.hash(state);
@@ -339,49 +413,53 @@ impl<FFN: Hash> Hash for F<FFN> {
     }
 }
 
-#[derive(Debug, Clone, PartialEq, Eq, Hash)]
-pub enum STDFN {
-    ABS(FICV),
-    SIN(FICV),
-    COS(FICV),
-    MIN(FICV, FICV),
-    MAX(FICV, FICV),
-}
 ///////////////////////////////////////////////////////////////////////////////////////////////////////////////////
-/// OPS that return [T;2] type aka U
+/// OPS that return [T;2] type aka UO
 ///////////////////////////////////////////////////////////////////////////////////////////////////////////////////
 
 pub type UCONST = [f64; 2];
 
 #[derive(Clone, Copy)]
-pub enum UICV {
+pub enum U {
     I(usize),
     CONST(UCONST),
     VAR(usize),
-    // FROM(FICV),
+    F(F),
 }
 
-// impl From<FICV> for UICV {
-//     fn from(value: FICV) -> Self {
-//         match value {
-//             FICV::CONST(c) => Self::CONST([c; 2]),
-//             _ => Self::FROM(value),
-//         }
-//     }
-// }
+impl TryFrom<ICV> for U {
+    type Error = Error;
+    #[inline]
+    fn try_from(value: ICV) -> Result<Self, Self::Error> {
+        match value {
+            U(uicv) => Ok(uicv),
+            F(ficv) => Ok(U::F(ficv)),
+            _ => Err(Error::InvalidType("Ivalid type".into())),
+        }
+    }
+}
 
-impl Debug for UICV {
+impl From<F> for U {
+    fn from(value: F) -> Self {
+        match value {
+            F::CONST(c) => Self::CONST([c; 2]),
+            _ => Self::F(value),
+        }
+    }
+}
+
+impl Debug for U {
     fn fmt(&self, f: &mut fmt::Formatter) -> Result<(), fmt::Error> {
         match self {
             Self::I(i) => write!(f, "@{:?}", i),
             Self::CONST(c) => write!(f, "CONST({:?})", c),
             Self::VAR(s) => write!(f, "VAR({:?})", s),
-            // Self::FROM(s) => write!(f, "{:?}", s),
+            Self::F(s) => write!(f, "{:?}", s),
         }
     }
 }
 
-impl Hash for UICV {
+impl Hash for U {
     #[inline]
     fn hash<H: Hasher>(&self, state: &mut H) {
         match self {
@@ -397,15 +475,16 @@ impl Hash for UICV {
             Self::VAR(u) => {
                 state.write_u8(3);
                 state.write_usize(*u);
-            } // Self::FROM(icv) => {
-              //     state.write_u8(4);
-              //     icv.hash(state);
-              // }
+            }
+            Self::F(ficv) => {
+                state.write_u8(4);
+                ficv.hash(state);
+            }
         }
     }
 }
 
-impl PartialEq for UICV {
+impl PartialEq for U {
     #[inline]
     fn eq(&self, other: &Self) -> bool {
         match (self, other) {
@@ -414,45 +493,56 @@ impl PartialEq for UICV {
                 (sx.to_bits(), sy.to_bits()) == (ox.to_bits(), oy.to_bits())
             }
             (Self::VAR(s), Self::VAR(o)) => s == o,
-            // (Self::FROM(s), Self::FROM(o)) => s == o,
+            (Self::F(s), Self::F(o)) => s == o,
             _ => false,
         }
     }
 }
 
-impl Eq for UICV {}
+impl Eq for U {}
 
 #[derive(Debug, Clone)]
-pub enum U<UFN> {
+pub enum UO<UFN> {
     //---- Primitive Value Types:
     CONST(UCONST),
     VAR(usize),
-    SET(FICV, FICV),
+    SET(F, F),
 
     //---- Unary Ops:
-    NEG(UICV),
-    NOT(UICV),
-    INV(UICV),
+    NEG(U),
+    NOT(U),
+    INV(U),
 
     //---- Binary Math Ops:
-    ADD(UICV, UICV),
+    ADD(U, U),
 
     // A Sub(x) is converted to an FADD(FNEG(x)).
-    MUL(UICV, UICV),
+    MUL(U, U),
     // A Div(n,d) is converted to a FMUL(n,FINV(d)).
-    MOD(UICV, UICV),
+    REM(U, U),
 
-    EXP(UICV, UICV),
+    EXP(U, U),
 
     //---- Equality Ops:
-    EQ(UICV, UICV),
-    NE(UICV, UICV),
+    EQ(U, U),
+    NE(U, U),
 
     //---- Functions:
     FN(UFN),
 }
 
-impl<UFN: PartialEq> PartialEq for U<UFN> {
+impl<FFN, UFN> TryFrom<OP<FFN, UFN>> for UO<UFN> {
+    type Error = Error;
+    #[inline]
+    fn try_from(value: OP<FFN, UFN>) -> Result<Self, Self::Error> {
+        match value {
+            OP::UO(uop) => Ok(uop),
+            _ => Err(Error::InvalidType("Ivalid type".into())),
+        }
+    }
+}
+
+impl<UFN: PartialEq> PartialEq for UO<UFN> {
     #[inline]
     fn eq(&self, other: &Self) -> bool {
         match (self, other) {
@@ -467,7 +557,7 @@ impl<UFN: PartialEq> PartialEq for U<UFN> {
             (Self::NEG(s), Self::NEG(o)) => s == o,
             (Self::NOT(s), Self::NOT(o)) => s == o,
             (Self::INV(s), Self::INV(o)) => s == o,
-            (Self::MOD(s0, s1), Self::MOD(o0, o1)) => (s0, s1) == (o0, o1),
+            (Self::REM(s0, s1), Self::REM(o0, o1)) => (s0, s1) == (o0, o1),
             (Self::EXP(s0, s1), Self::EXP(o0, o1)) => (s0, s1) == (o0, o1),
             (Self::EQ(s0, s1), Self::EQ(o0, o1)) => (s0, s1) == (o0, o1) || (s0, s1) == (o1, o0),
             (Self::NE(s0, s1), Self::NE(o0, o1)) => (s0, s1) == (o0, o1) || (s0, s1) == (o1, o0),
@@ -476,9 +566,9 @@ impl<UFN: PartialEq> PartialEq for U<UFN> {
         }
     }
 }
-impl<UFN: Eq> Eq for U<UFN> {}
+impl<UFN: Eq> Eq for UO<UFN> {}
 
-impl<UFN: Hash> Hash for U<UFN> {
+impl<UFN: Hash> Hash for UO<UFN> {
     #[inline]
     fn hash<H: Hasher>(&self, state: &mut H) {
         match self {
@@ -516,7 +606,7 @@ impl<UFN: Hash> Hash for U<UFN> {
                 state.write_u8(8);
                 state.write_u64(_hash(a0) ^ _hash(a1));
             }
-            Self::MOD(a0, a1) => {
+            Self::REM(a0, a1) => {
                 state.write_u8(9);
                 a0.hash(state);
                 a1.hash(state);
@@ -534,6 +624,7 @@ impl<UFN: Hash> Hash for U<UFN> {
                 state.write_u8(14);
                 state.write_u64(_hash(a0) ^ _hash(a1));
             }
+
             Self::FN(ufn) => {
                 state.write_u8(15);
                 ufn.hash(state);
@@ -553,5 +644,3 @@ fn _hash<T: Hash>(obj: T) -> u64 {
 pub(crate) fn sort<FFN, UFN>(ops: &mut [OP<FFN, UFN>]) {
     ops.sort_by(|a, b| a.order().cmp(&b.order()))
 }
-
-// Builtins functions

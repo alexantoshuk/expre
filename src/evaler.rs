@@ -2,14 +2,15 @@ use crate::compiler::*;
 use crate::context::*;
 use crate::error::Error;
 use crate::float::*;
-use crate::map2;
+// use crate::map2;
+use crate::module;
 use crate::ops::*;
-use indexmap::IndexMap;
+use indexmap::{IndexMap, IndexSet};
 
 #[derive(Debug, Copy, Clone, PartialEq)]
 pub enum Value<T> {
-    F(T),
-    U([T; 2]),
+    FO(T),
+    UO([T; 2]),
     // V([T; 3]),
 }
 
@@ -17,146 +18,154 @@ impl<M> CExpr<M>
 where
     M: Module,
 {
-    fn eval<CTX: Context>(&self, ctx: &CTX) -> Value<CTX::F>
+    fn eval<T: Float, CTX: Context<T>>(&self, ctx: &CTX) -> Value<T>
     where
-        M::FFN: FEvaler<M, CTX>,
-        M::UFN: UEvaler<M, CTX>,
+        M::FFN: FEvaler<M, T, CTX>,
+        M::UFN: UEvaler<M, T, CTX>,
     {
         match self.ops.last().unwrap() {
-            F(fop) => Value::F(fop.eval(self, ctx)),
-            U(uop) => Value::U(uop.eval(self, ctx)),
+            FO(fop) => Value::FO(fop.eval(self, ctx)),
+            UO(uop) => Value::UO(uop.eval(self, ctx)),
         }
     }
 
-    fn feval<CTX: Context>(&self, ctx: &CTX) -> CTX::F
+    fn feval<T: Float, CTX: Context<T>>(&self, ctx: &CTX) -> T
     where
-        M::FFN: FEvaler<M, CTX>,
-        M::UFN: UEvaler<M, CTX>,
+        M::FFN: FEvaler<M, T, CTX>,
+        M::UFN: UEvaler<M, T, CTX>,
     {
         match self.ops.last().unwrap() {
-            F(fop) => fop.eval(self, ctx),
-            U(uop) => uop.eval(self, ctx)[0],
+            FO(fop) => fop.eval(self, ctx),
+            UO(uop) => uop.eval(self, ctx)[0],
         }
     }
 
-    fn ueval<CTX: Context>(&self, ctx: &CTX) -> [CTX::F; 2]
+    fn ueval<T: Float, CTX: Context<T>>(&self, ctx: &CTX) -> [T; 2]
     where
-        M::FFN: FEvaler<M, CTX>,
-        M::UFN: UEvaler<M, CTX>,
+        M::FFN: FEvaler<M, T, CTX>,
+        M::UFN: UEvaler<M, T, CTX>,
     {
         match self.ops.last().unwrap() {
-            U(uop) => uop.eval(self, ctx),
-            F(fop) => [fop.eval(self, ctx); 2],
+            UO(uop) => uop.eval(self, ctx),
+            FO(fop) => [fop.eval(self, ctx); 2],
         }
     }
 }
 
-pub trait Evaler<M, CTX>
+pub trait Evaler<M, T, CTX>
 where
     M: Module,
-    CTX: Context,
+    T: Float,
+    CTX: Context<T>,
 {
-    fn eval(&self, ctx: &M, ctx: &CTX) -> Value<CTX::F>;
+    fn eval(&self, ctx: &M, ctx: &CTX) -> Value<T>;
 }
 
-pub trait FEvaler<M, CTX>
+pub trait FEvaler<M, T, CTX>
 where
     M: Module,
-    CTX: Context,
+    T: Float,
+    CTX: Context<T>,
 {
-    fn eval(&self, cexpr: &CExpr<M>, ctx: &CTX) -> CTX::F;
+    fn eval(&self, cexpr: &CExpr<M>, ctx: &CTX) -> T;
 }
 
-pub trait UEvaler<M, CTX>
+pub trait UEvaler<M, T, CTX>
 where
     M: Module,
-
-    CTX: Context,
+    T: Float,
+    CTX: Context<T>,
 {
-    fn eval(&self, cexpr: &CExpr<M>, ctx: &CTX) -> [CTX::F; 2];
+    fn eval(&self, cexpr: &CExpr<M>, ctx: &CTX) -> [T; 2];
 }
 
-impl<M, CTX> FEvaler<M, CTX> for ()
+impl<M, T, CTX> FEvaler<M, T, CTX> for ()
 where
     M: Module,
-    CTX: Context,
+    T: Float,
+    CTX: Context<T>,
 {
-    fn eval(&self, cexpr: &CExpr<M>, ctx: &CTX) -> CTX::F {
-        CTX::F::ZERO
+    fn eval(&self, cexpr: &CExpr<M>, ctx: &CTX) -> T {
+        T::ZERO
     }
 }
 
-impl<M, CTX> UEvaler<M, CTX> for ()
+impl<M, T, CTX> UEvaler<M, T, CTX> for ()
 where
     M: Module,
-
-    CTX: Context,
+    T: Float,
+    CTX: Context<T>,
 {
-    fn eval(&self, cexpr: &CExpr<M>, ctx: &CTX) -> [CTX::F; 2] {
-        [CTX::F::ZERO; 2]
+    fn eval(&self, cexpr: &CExpr<M>, ctx: &CTX) -> [T; 2] {
+        [T::ZERO; 2]
     }
 }
 
-impl<M, CTX> FEvaler<M, CTX> for FICV
+impl<M, T, CTX> FEvaler<M, T, CTX> for F
 where
     M: Module,
-    CTX: Context,
-    M::FFN: FEvaler<M, CTX>,
-    M::UFN: UEvaler<M, CTX>,
+    T: Float,
+    CTX: Context<T>,
+    M::FFN: FEvaler<M, T, CTX>,
+    M::UFN: UEvaler<M, T, CTX>,
 {
     #[inline]
-    fn eval(&self, cexpr: &CExpr<M>, ctx: &CTX) -> CTX::F {
+    fn eval(&self, cexpr: &CExpr<M>, ctx: &CTX) -> T {
         match self {
-            Self::CONST(c) => CTX::F::from_f64(*c),
+            Self::CONST(c) => T::from_f64(*c),
             Self::VAR(offset) => ctx.get_fvar(*offset),
             Self::I(i) => match cexpr.get(*i) {
-                F(fop) => fop.eval(cexpr, ctx),
-                U(uop) => uop.eval(cexpr, ctx)[0],
+                FO(fop) => fop.eval(cexpr, ctx),
+                // UO(uop) => uop.eval(cexpr, ctx)[0],
+                _ => unreachable!(),
             },
         }
     }
 }
 
-impl<M, CTX> UEvaler<M, CTX> for UICV
+impl<M, T, CTX> UEvaler<M, T, CTX> for U
 where
     M: Module,
-    CTX: Context,
-    M::FFN: FEvaler<M, CTX>,
-    M::UFN: UEvaler<M, CTX>,
+    T: Float,
+    CTX: Context<T>,
+    M::FFN: FEvaler<M, T, CTX>,
+    M::UFN: UEvaler<M, T, CTX>,
 {
     #[inline]
-    fn eval(&self, cexpr: &CExpr<M>, ctx: &CTX) -> [CTX::F; 2] {
+    fn eval(&self, cexpr: &CExpr<M>, ctx: &CTX) -> [T; 2] {
         match self {
-            Self::CONST([x, y]) => [CTX::F::from_f64(*x), CTX::F::from_f64(*y)],
+            Self::CONST([x, y]) => [T::from_f64(*x), T::from_f64(*y)],
             Self::VAR(offset) => ctx.get_uvar(*offset),
             Self::I(i) => match cexpr.get(*i) {
-                U(uop) => uop.eval(cexpr, ctx),
-                F(fop) => [fop.eval(cexpr, ctx); 2],
+                UO(uop) => uop.eval(cexpr, ctx),
+                // FO(fop) => [fop.eval(cexpr, ctx); 2],
+                _ => unreachable!(),
             },
-            // Self::FROM(fcv) => [fcv.eval(cexpr, ctx); 2],
+            Self::F(ficv) => [ficv.eval(cexpr, ctx); 2],
         }
     }
 }
 
-impl<M, CTX> FEvaler<M, CTX> for F<M::FFN>
+impl<M, T, CTX> FEvaler<M, T, CTX> for FO<M::FFN>
 where
     M: Module,
-    CTX: Context,
-    M::FFN: FEvaler<M, CTX>,
-    M::UFN: UEvaler<M, CTX>,
+    T: Float,
+    CTX: Context<T>,
+    M::FFN: FEvaler<M, T, CTX>,
+    M::UFN: UEvaler<M, T, CTX>,
 {
     #[inline]
-    fn eval(&self, cexpr: &CExpr<M>, ctx: &CTX) -> CTX::F {
-        let zero = CTX::F::ZERO;
+    fn eval(&self, cexpr: &CExpr<M>, ctx: &CTX) -> T {
+        let zero = T::ZERO;
         match self {
             // FI have manually ordered these match arms in a way that FI feel should deliver good performance.
             // (FI don't think this ordering actually affects the generated code, though.)s
-            Self::MUL(licv, ricv) => licv.eval(cexpr, ctx) * ricv.eval(cexpr, ctx),
-            Self::ADD(licv, ricv) => licv.eval(cexpr, ctx) + ricv.eval(cexpr, ctx),
-            Self::MOD(licv, ricv) => CTX::F::rem(licv.eval(cexpr, ctx), ricv.eval(cexpr, ctx)),
-            Self::EXP(base, power) => CTX::F::pow(base.eval(cexpr, ctx), power.eval(cexpr, ctx)),
-            Self::NEG(icv) => -icv.eval(cexpr, ctx),
-            Self::INV(icv) => CTX::F::recip(icv.eval(cexpr, ctx)),
+            Self::MUL(licv, ricv) => T::mul(licv.eval(cexpr, ctx), ricv.eval(cexpr, ctx)),
+            Self::ADD(licv, ricv) => T::add(licv.eval(cexpr, ctx), ricv.eval(cexpr, ctx)),
+            Self::REM(licv, ricv) => T::rem(licv.eval(cexpr, ctx), ricv.eval(cexpr, ctx)),
+            Self::EXP(base, power) => T::pow(base.eval(cexpr, ctx), power.eval(cexpr, ctx)),
+            Self::NEG(icv) => T::neg(icv.eval(cexpr, ctx)),
+            Self::INV(icv) => T::recip(icv.eval(cexpr, ctx)),
 
             // Self::EQ(licv, ricv) => (licv.eval(cexpr, ctx) == ricv.eval(cexpr, ctx)).into(),
             // Self::NE(licv, ricv) => (licv.eval(cexpr, ctx) != ricv.eval(cexpr, ctx)).into(),
@@ -182,46 +191,37 @@ where
             //         ricv.eval(cexpr, ctx)
             //     }
             // }
-            Self::CONST(c) => CTX::F::from_f64(*c),
+            Self::FN(ffn) => ffn.eval(cexpr, ctx),
+            Self::CONST(c) => T::from_f64(*c),
             Self::VAR(offset) => ctx.get_fvar(*offset),
             _ => unimplemented!(),
         }
     }
 }
 
-impl<M, CTX> UEvaler<M, CTX> for U<M::UFN>
+impl<M, T, CTX> UEvaler<M, T, CTX> for UO<M::UFN>
 where
     M: Module,
-    CTX: Context,
-    M::FFN: FEvaler<M, CTX>,
-    M::UFN: UEvaler<M, CTX>,
+    T: Float,
+    CTX: Context<T>,
+    M::FFN: FEvaler<M, T, CTX>,
+    M::UFN: UEvaler<M, T, CTX>,
 {
     #[inline]
-    fn eval(&self, cexpr: &CExpr<M>, ctx: &CTX) -> [CTX::F; 2] {
-        let zero = CTX::F::ZERO;
+    fn eval(&self, cexpr: &CExpr<M>, ctx: &CTX) -> [T; 2] {
+        let zero = T::ZERO;
         match self {
             Self::SET(icv0, icv1) => [icv0.eval(cexpr, ctx), icv1.eval(cexpr, ctx)],
-            Self::ADD(licv, ricv) => map2!(
-                std::ops::Add::add,
-                licv.eval(cexpr, ctx),
-                ricv.eval(cexpr, ctx)
-            ),
-            Self::MUL(licv, ricv) => map2!(
-                std::ops::Mul::mul,
-                licv.eval(cexpr, ctx),
-                ricv.eval(cexpr, ctx)
-            ),
-            Self::EXP(base, power) => {
-                map2!(CTX::F::pow, base.eval(cexpr, ctx), power.eval(cexpr, ctx))
-            }
-            Self::MOD(base, power) => {
-                map2!(CTX::F::rem, base.eval(cexpr, ctx), power.eval(cexpr, ctx))
-            }
-            Self::NEG(icv) => map2!(std::ops::Neg::neg, icv.eval(cexpr, ctx)),
-            Self::INV(icv) => map2!(CTX::F::recip, icv.eval(cexpr, ctx)),
+            Self::ADD(licv, ricv) => <[T; 2]>::add(licv.eval(cexpr, ctx), ricv.eval(cexpr, ctx)),
+            Self::MUL(licv, ricv) => <[T; 2]>::mul(licv.eval(cexpr, ctx), ricv.eval(cexpr, ctx)),
+            Self::EXP(base, power) => <[T; 2]>::pow(base.eval(cexpr, ctx), power.eval(cexpr, ctx)),
+            Self::REM(base, power) => <[T; 2]>::rem(base.eval(cexpr, ctx), power.eval(cexpr, ctx)),
+            Self::NEG(icv) => <[T; 2]>::neg(icv.eval(cexpr, ctx)),
+            Self::INV(icv) => <[T; 2]>::recip(icv.eval(cexpr, ctx)),
 
             // Self::NOT(icv) => map2!(|x| (x == zero).into(), icv.eval(cexpr)),
-            Self::CONST(c) => map2!(CTX::F::from_f64, c),
+            Self::FN(ufn) => ufn.eval(cexpr, ctx),
+            Self::CONST([x, y]) => [T::from_f64(*x), T::from_f64(*y)],
             Self::VAR(offset) => ctx.get_uvar(*offset),
             _ => unimplemented!(),
         }
@@ -250,34 +250,17 @@ mod test {
         // impl Module for Data {
         //     type FFN = ();
         //     type UFN = ();
-        //     type F = f32;
+        //     type FO = f32;
         //     fn var(name: &str) -> Option<OP<Self>> {
         //         match name {
-        //             "id" => Some(F(F::VAR(0))),
-        //             "b" => Some(F(F::VAR(1))),
-        //             "uv" => Some(U(U::VAR(2))),
+        //             "id" => Some(FO(FO::VAR(0))),
+        //             "b" => Some(FO(FO::VAR(1))),
+        //             "uv" => Some(UO(UO::VAR(2))),
         //             _ => None,
         //         }
         //     }
         // }
 
-        #[repr(C)]
-        #[derive(Debug, Clone)]
-        struct MyModule(IndexMap<String, OP<(), ()>>);
-        impl MyModule {
-            fn new(m: IndexMap<String, OP<(), ()>>) -> Self {
-                MyModule(m)
-            }
-        }
-
-        impl Module for MyModule {
-            type FFN = ();
-            type UFN = ();
-
-            fn var(&self, name: &str) -> Option<OP<(), ()>> {
-                self.0.get(name).cloned()
-            }
-        }
         let mmm = MyModule::new(IndexMap::from([
             ("id".into(), F(F::VAR(0))),
             ("b".into(), F(F::VAR(1))),
@@ -294,9 +277,7 @@ mod test {
         }
 
         let a = 0;
-        impl Context for Ctx {
-            type F = f32;
-        }
+        impl Context<f32> for Ctx {}
 
         let ctx = Ctx {
             id: 0.5,
@@ -312,13 +293,13 @@ mod test {
         //
         // println!("size of OP: {}", std::mem::size_of::<OP<MyModule>>());
         println!("size of ICV: {}", std::mem::size_of::<ICV>());
-        println!("size of FICV: {}", std::mem::size_of::<FICV>());
-        println!("size of UICV: {}", std::mem::size_of::<UICV>());
+        println!("size of F: {}", std::mem::size_of::<F>());
+        println!("size of U: {}", std::mem::size_of::<U>());
         let mut ast = Ast::new();
 
         let mut cexpr = CExpr::new();
 
-        let expr_str = "a=3+uv+id+[1,2] + 0.5+uv+b;a";
+        let expr_str = "a=3+uv+id+[1,2] + dot([1,2],1)+uv+b;a";
         eprintln!("Test expr: '{}'\n", expr_str);
 
         println!("PARSE: {:?}", ast.parse(expr_str));
@@ -343,14 +324,14 @@ mod test {
         // cexpr.add_var("w".to_owned(), &data.w);
 
         let ok = ast.compile(&mut cexpr, &mmm);
-
+        println!("OK: {:?}", ok);
         // eprintln!("CEXPR: {:?}", ok);
         // data.x = 0.0;
         // }
 
         let v = cexpr.eval(&ctx);
         println!("CEXPR:\n{:?}", cexpr);
-        assert_eq!(Value::F(88956.0), v);
+        assert_eq!(Value::FO(88956.0), v);
 
         // let expr_str = "a=((1+-5.345) +4 +xxxxxxxx +5)-xxxxxxxx;a +((((87))) - tan(xxxxxxxx)) + 1.3446346346346324e-2 + (97 + (((15 / 55*xxxxxxxx * ((sin(-31))) + 35))) + (15 - (cos(9))) - (39 / 26) / 20*cos(yyyyyyyyyyyyy) / 91 +(abs(-xxxxxxxx))+ 27 / (33 * sin(26) + 28-(yyyyyyyyyyyyy) - a*a+(7) / 10*tan(yyyyyyyyyyyyy) + 66 * 6) + sin(60) / 35 - ((29) - (cos(69)) / 44 / (92)) / (cos(89)) + 2 + 87 / 47 * ((2)) * 83 / 98 * 42 / (((67)) * ((97))) / (34 / 89 + 77) - 29 + 70 * (20)) + ((((((92))) + 23 * (98) / (95) + (((99) * (41))) + (5 + 41) + 10) - (36) / (6 + 80 * 52 + (90))))";
         // eprintln!("Test expr: '{}'\n", expr_str);
@@ -376,6 +357,72 @@ mod test {
 
         // let v = cexpr.eval();
         // println!("{:?}", cexpr);
-        // assert_eq!(Value::F(5807.369321620128), v);
+        // assert_eq!(Value::FO(5807.369321620128), v);
+    }
+}
+
+// module! {
+//     MyModule {
+//         F {
+//             F("sin", x:F) => sin(x),
+//             F("cos", x:F) => cos(x),
+//             F("clamp", x:F, min:F, max:F) => clamp(x,min,max),
+//             // ("rand", min:FO, max:FO, seed:FO) => rand(min,max,seed),
+//             // ("rand", min:FO, max:FO) => rand(min,max,var("seed")),
+//             // ("rand", seed:FO) => rand(0.0,1.0,seed),
+//             // ("rand") => rand(0.0,1.0,var("seed")),
+//             F("clamp", x:F) => clamp(x, 0.0, F::VAR(1)),
+//         },
+//         U {
+//             // ("sin", x:U) => sin(x),
+//             // _("sin", x:U) => sin(x),
+//         },
+//     }
+// }
+
+module! {
+    MyModule<f32> {
+        F::dot(x:U,y:U);
+        // @F::clamp(x:F) {clamp(x, 0.0, F::VAR(1))};
+        // @F::clamp(x: F) => clamp(x, 0.0, 1.0);
+        U::zzz(x:U);
+    }
+}
+trait ZZZ {
+    fn zzz(self) -> Self;
+}
+
+impl ZZZ for [f32; 2] {
+    fn zzz(self) -> Self {
+        [self[0] * self[0], self[1] * self[1]]
+    }
+}
+
+impl ZZZ for [f64; 2] {
+    fn zzz(self) -> Self {
+        [self[0] * self[0], self[1] * self[1]]
+    }
+}
+
+trait UUU: Sized {
+    fn uuu(self) -> Self;
+    fn dot(x: [Self; 2], y: [Self; 2]) -> Self;
+}
+
+impl UUU for f32 {
+    fn uuu(self) -> Self {
+        self * self
+    }
+    fn dot(x: [Self; 2], y: [Self; 2]) -> Self {
+        x[0]
+    }
+}
+
+impl UUU for f64 {
+    fn uuu(self) -> Self {
+        self * self
+    }
+    fn dot(x: [Self; 2], y: [Self; 2]) -> Self {
+        x[0]
     }
 }

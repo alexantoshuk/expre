@@ -91,7 +91,7 @@ pub enum BinaryOp {
     Sub = 10,
     Mul = 11,
     Div = 12,
-    Mod = 13,
+    Rem = 13,
     Exp = 14, // Highest Priority
 }
 pub(crate) use crate::tokens::BinaryOp::*;
@@ -111,7 +111,7 @@ impl Display for BinaryOp {
             Sub => write!(f, "-"),
             Mul => write!(f, "*"),
             Div => write!(f, "/"),
-            Mod => write!(f, "%"),
+            Rem => write!(f, "%"),
             Exp => write!(f, "^"),
         }
     }
