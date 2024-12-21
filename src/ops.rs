@@ -85,21 +85,21 @@ impl TryFrom<ICV> for [f64; 2] {
 
 #[derive(Debug, Clone, PartialEq, Eq, Hash)]
 pub enum OP<FFN, UFN> {
-    FO(FO<FFN>),
-    UO(UO<UFN>),
+    FOP(FOP<FFN>),
+    UOP(UOP<UFN>),
 }
 
 pub(crate) use crate::ops::OP::*;
 
-impl<FFN, UFN> From<FO<FFN>> for OP<FFN, UFN> {
-    fn from(value: FO<FFN>) -> Self {
-        Self::FO(value)
+impl<FFN, UFN> From<FOP<FFN>> for OP<FFN, UFN> {
+    fn from(value: FOP<FFN>) -> Self {
+        Self::FOP(value)
     }
 }
 
-impl<FFN, UFN> From<UO<UFN>> for OP<FFN, UFN> {
-    fn from(value: UO<UFN>) -> Self {
-        Self::UO(value)
+impl<FFN, UFN> From<UOP<UFN>> for OP<FFN, UFN> {
+    fn from(value: UOP<UFN>) -> Self {
+        Self::UOP(value)
     }
 }
 
@@ -107,11 +107,11 @@ impl<FFN, UFN> OP<FFN, UFN> {
     #[inline]
     fn order(&self) -> u32 {
         match self {
-            Self::FO(FO::CONST(_)) => 1,
-            Self::UO(UO::CONST(_)) => 2,
+            Self::FOP(FOP::CONST(_)) => 1,
+            Self::UOP(UOP::CONST(_)) => 2,
 
-            Self::FO(_) => 10,
-            Self::UO(_) => 11,
+            Self::FOP(_) => 10,
+            Self::UOP(_) => 11,
         }
     }
 
@@ -135,11 +135,11 @@ impl<FFN, UFN> OP<FFN, UFN> {
 //     #[inline]
 //     fn hash<H: Hasher>(&self, state: &mut H) {
 //         match self {
-//             Self::FO(op) => {
+//             Self::FOP(op) => {
 //                 state.write_u8(1);
 //                 op.hash(state);
 //             }
-//             Self::UO(op) => {
+//             Self::UOP(op) => {
 //                 state.write_u8(2);
 //                 op.hash(state);
 //             }
@@ -148,7 +148,7 @@ impl<FFN, UFN> OP<FFN, UFN> {
 // }
 
 ///////////////////////////////////////////////////////////////////////////////////////////////////////////////////
-/// OPS that return scalar T type aka FO
+/// OPS that return scalar T type aka FOP
 ///////////////////////////////////////////////////////////////////////////////////////////////////////////////////
 pub type FCONST = f64;
 
@@ -252,7 +252,7 @@ impl Eq for F {}
 //     ADD(Type, ICV, ICV),
 // }
 #[derive(Debug, Clone)]
-pub enum FO<FFN> {
+pub enum FOP<FFN> {
     //---- Primitive Value Types:
     CONST(FCONST),
     VAR(usize),
@@ -287,18 +287,18 @@ pub enum FO<FFN> {
     FN(FFN),
 }
 
-impl<FFN, UFN> TryFrom<OP<FFN, UFN>> for FO<FFN> {
+impl<FFN, UFN> TryFrom<OP<FFN, UFN>> for FOP<FFN> {
     type Error = Error;
     #[inline]
     fn try_from(value: OP<FFN, UFN>) -> Result<Self, Self::Error> {
         match value {
-            OP::FO(fop) => Ok(fop),
+            OP::FOP(fop) => Ok(fop),
             _ => Err(Error::InvalidType("Ivalid type".into())),
         }
     }
 }
 
-impl<FFN: PartialEq> PartialEq for FO<FFN> {
+impl<FFN: PartialEq> PartialEq for FOP<FFN> {
     #[inline]
     fn eq(&self, other: &Self) -> bool {
         match (self, other) {
@@ -325,9 +325,9 @@ impl<FFN: PartialEq> PartialEq for FO<FFN> {
     }
 }
 
-impl<FFN: PartialEq> Eq for FO<FFN> {}
+impl<FFN: PartialEq> Eq for FOP<FFN> {}
 
-impl<FFN: Hash> Hash for FO<FFN> {
+impl<FFN: Hash> Hash for FOP<FFN> {
     #[inline]
     fn hash<H: Hasher>(&self, state: &mut H) {
         match self {
@@ -414,7 +414,7 @@ impl<FFN: Hash> Hash for FO<FFN> {
 }
 
 ///////////////////////////////////////////////////////////////////////////////////////////////////////////////////
-/// OPS that return [T;2] type aka UO
+/// OPS that return [T;2] type aka UOP
 ///////////////////////////////////////////////////////////////////////////////////////////////////////////////////
 
 pub type UCONST = [f64; 2];
@@ -502,7 +502,7 @@ impl PartialEq for U {
 impl Eq for U {}
 
 #[derive(Debug, Clone)]
-pub enum UO<UFN> {
+pub enum UOP<UFN> {
     //---- Primitive Value Types:
     CONST(UCONST),
     VAR(usize),
@@ -531,18 +531,18 @@ pub enum UO<UFN> {
     FN(UFN),
 }
 
-impl<FFN, UFN> TryFrom<OP<FFN, UFN>> for UO<UFN> {
+impl<FFN, UFN> TryFrom<OP<FFN, UFN>> for UOP<UFN> {
     type Error = Error;
     #[inline]
     fn try_from(value: OP<FFN, UFN>) -> Result<Self, Self::Error> {
         match value {
-            OP::UO(uop) => Ok(uop),
+            OP::UOP(uop) => Ok(uop),
             _ => Err(Error::InvalidType("Ivalid type".into())),
         }
     }
 }
 
-impl<UFN: PartialEq> PartialEq for UO<UFN> {
+impl<UFN: PartialEq> PartialEq for UOP<UFN> {
     #[inline]
     fn eq(&self, other: &Self) -> bool {
         match (self, other) {
@@ -566,9 +566,9 @@ impl<UFN: PartialEq> PartialEq for UO<UFN> {
         }
     }
 }
-impl<UFN: Eq> Eq for UO<UFN> {}
+impl<UFN: Eq> Eq for UOP<UFN> {}
 
-impl<UFN: Hash> Hash for UO<UFN> {
+impl<UFN: Hash> Hash for UOP<UFN> {
     #[inline]
     fn hash<H: Hasher>(&self, state: &mut H) {
         match self {

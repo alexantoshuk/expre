@@ -26,7 +26,7 @@
 
 use crate::context::*;
 use crate::error::Error;
-// pub use crate::parser::FO;
+// pub use crate::parser::FOP;
 // use crate::context::{self, Module};
 use crate::debug_indexed_list;
 use crate::float::*;
@@ -155,10 +155,10 @@ impl<M: Module> CExpr<M> {
     // #[inline]
     // pub fn instr_to_arg(&mut self, op: OP<M>) -> ICV {
     //     match op {
-    //         FO(F(a)) => ICV::F(a),
-    //         UO(U(a)) => ICV::U(a),
-    //         FO(_) => ICV::F(FO(self.push(op))),
-    //         UO(_) => ICV::U(UO(self.push(op))),
+    //         FOP(F(a)) => ICV::F(a),
+    //         UOP(U(a)) => ICV::U(a),
+    //         FOP(_) => ICV::F(FOP(self.push(op))),
+    //         UOP(_) => ICV::U(UOP(self.push(op))),
     //     }
     // }
 }
@@ -167,8 +167,8 @@ impl<M: Module> CExpr<M> {
 //     #[inline]
 //     fn to_uicv<M>(self, expr: &mut CExpr<M>) -> F {
 //         match self {
-//             FO(op) => F::F(op.to_icv(expr)),
-//             UO(op) => U::U(op.to_icv(expr)),
+//             FOP(op) => F::F(op.to_icv(expr)),
+//             UOP(op) => U::U(op.to_icv(expr)),
 //         }
 //     }
 // }
@@ -177,78 +177,78 @@ impl<FFN, UFN> ops::OP<FFN, UFN> {
     #[inline]
     fn to_icv<M: Module<FFN = FFN, UFN = UFN>>(self, expr: &mut CExpr<M>) -> ICV {
         match self {
-            FO(FO::CONST(c)) => F(F::CONST(c)),
-            FO(FO::VAR(v)) => F(F::VAR(v)),
-            FO(_) => F(F::I(expr.push(self))),
+            FOP(FOP::CONST(c)) => F(F::CONST(c)),
+            FOP(FOP::VAR(v)) => F(F::VAR(v)),
+            FOP(_) => F(F::I(expr.push(self))),
 
-            UO(UO::CONST(c)) => U(U::CONST(c)),
-            UO(UO::VAR(v)) => U(U::VAR(v)),
-            UO(_) => U(U::I(expr.push(self))),
+            UOP(UOP::CONST(c)) => U(U::CONST(c)),
+            UOP(UOP::VAR(v)) => U(U::VAR(v)),
+            UOP(_) => U(U::I(expr.push(self))),
         }
     }
 
     // #[inline]
     // fn to_ficv<M: Module<FFN = FFN, UFN = UFN>>(self, expr: &mut CExpr<M>) -> F {
     //     match self {
-    //         FO(FO::CONST(c)) => F::CONST(c),
-    //         FO(FO::VAR(v)) => F::VAR(v),
-    //         FO(_) => F::I(expr.push(self)),
+    //         FOP(FOP::CONST(c)) => F::CONST(c),
+    //         FOP(FOP::VAR(v)) => F::VAR(v),
+    //         FOP(_) => F::I(expr.push(self)),
 
-    //         UO(UO::CONST(c)) => F::CONST(c[0]),
-    //         UO(UO::VAR(v)) => F::VAR(v),
-    //         UO(_) => F::I(expr.push(self)),
+    //         UOP(UOP::CONST(c)) => F::CONST(c[0]),
+    //         UOP(UOP::VAR(v)) => F::VAR(v),
+    //         UOP(_) => F::I(expr.push(self)),
     //     }
     // }
 
     // #[inline]
     // fn to_uicv<M: Module<FFN = FFN, UFN = UFN>>(self, expr: &mut CExpr<M>) -> U {
     //     match self {
-    //         UO(UO::CONST(c)) => U::CONST(c),
-    //         UO(UO::VAR(v)) => U::VAR(v),
-    //         UO(_) => U::I(expr.push(self)),
+    //         UOP(UOP::CONST(c)) => U::CONST(c),
+    //         UOP(UOP::VAR(v)) => U::VAR(v),
+    //         UOP(_) => U::I(expr.push(self)),
 
-    //         FO(FO::CONST(c)) => U::CONST([c; 2]),
-    //         // FO(FO::VAR(c)) => U::FROM(F::VAR(c)),
-    //         FO(_) => U::I(expr.push(self)),
+    //         FOP(FOP::CONST(c)) => U::CONST([c; 2]),
+    //         // FOP(FOP::VAR(c)) => U::FROM(F::VAR(c)),
+    //         FOP(_) => U::I(expr.push(self)),
     //     }
     // }
 }
 
-impl<FFN> FO<FFN> {
+impl<FFN> FOP<FFN> {
     #[inline]
     fn to_ficv<M: Module<FFN = FFN>>(self, expr: &mut CExpr<M>) -> F {
         match self {
-            FO::CONST(c) => F::CONST(c),
-            FO::VAR(v) => F::VAR(v),
-            _ => F::I(expr.push(FO(self))),
+            FOP::CONST(c) => F::CONST(c),
+            FOP::VAR(v) => F::VAR(v),
+            _ => F::I(expr.push(FOP(self))),
         }
     }
 
     // #[inline]
     // fn to_uicv<M: Module<FFN = FFN>>(self, expr: &mut CExpr<M>) -> U {
     //     match self {
-    //         FO::CONST(c) => U::CONST([c; 2]),
-    //         _ => U::I(expr.push(FO(self))),
+    //         FOP::CONST(c) => U::CONST([c; 2]),
+    //         _ => U::I(expr.push(FOP(self))),
     //     }
     // }
 }
 
-impl<UFN> UO<UFN> {
+impl<UFN> UOP<UFN> {
     // #[inline]
     // fn to_ficv<M: Module<UFN = UFN>>(self, expr: &mut CExpr<M>) -> F {
     //     match self {
-    //         UO::CONST(c) => F::CONST(c[0]),
-    //         UO::VAR(v) => F::VAR(v),
-    //         _ => F::I(expr.push(UO(self))),
+    //         UOP::CONST(c) => F::CONST(c[0]),
+    //         UOP::VAR(v) => F::VAR(v),
+    //         _ => F::I(expr.push(UOP(self))),
     //     }
     // }
 
     #[inline]
     fn to_uicv<M: Module<UFN = UFN>>(self, expr: &mut CExpr<M>) -> U {
         match self {
-            UO::CONST(c) => U::CONST(c),
-            UO::VAR(v) => U::VAR(v),
-            _ => U::I(expr.push(UO(self))),
+            UOP::CONST(c) => U::CONST(c),
+            UOP::VAR(v) => U::VAR(v),
+            _ => U::I(expr.push(UOP(self))),
         }
     }
 }
@@ -264,121 +264,121 @@ impl<M: Module> CExpr<M> {
     #[inline]
     fn neg_wrap(&mut self, op: OP<M>) -> OP<M> {
         match op {
-            FO(FO::NEG(_)) | UO(UO::NEG(_)) => self.pop(),
-            FO(FO::CONST(c)) => FO(FO::CONST(-c)),
-            FO(op) => FO(FO::NEG(op.to_ficv(self))),
-            UO(UO::CONST([x, y])) => UO(UO::CONST([-x, -y])),
-            UO(op) => UO(UO::NEG(op.to_uicv(self))),
+            FOP(FOP::NEG(_)) | UOP(UOP::NEG(_)) => self.pop(),
+            FOP(FOP::CONST(c)) => FOP(FOP::CONST(-c)),
+            FOP(op) => FOP(FOP::NEG(op.to_ficv(self))),
+            UOP(UOP::CONST([x, y])) => UOP(UOP::CONST([-x, -y])),
+            UOP(op) => UOP(UOP::NEG(op.to_uicv(self))),
         }
     }
 
     #[inline]
     fn not_wrap(&mut self, op: OP<M>) -> OP<M> {
         match op {
-            FO(FO::NOT(_)) | UO(UO::NOT(_)) => self.pop(),
-            FO(FO::CONST(c)) => FO(FO::CONST((c == 0.0).into())),
-            FO(op) => FO(FO::NOT(op.to_ficv(self))),
-            UO(UO::CONST([x, y])) => UO(UO::CONST([(x == 0.0).into(), (y == 0.0).into()])),
-            UO(op) => UO(UO::NOT(op.to_uicv(self))),
+            FOP(FOP::NOT(_)) | UOP(UOP::NOT(_)) => self.pop(),
+            FOP(FOP::CONST(c)) => FOP(FOP::CONST((c == 0.0).into())),
+            FOP(op) => FOP(FOP::NOT(op.to_ficv(self))),
+            UOP(UOP::CONST([x, y])) => UOP(UOP::CONST([(x == 0.0).into(), (y == 0.0).into()])),
+            UOP(op) => UOP(UOP::NOT(op.to_uicv(self))),
         }
     }
 
     #[inline]
     fn inv_wrap(&mut self, op: OP<M>) -> OP<M> {
         match op {
-            FO(FO::INV(_)) | UO(UO::INV(_)) => self.pop(),
-            FO(FO::CONST(c)) => FO(FO::CONST(c.recip())),
-            FO(op) => FO(FO::INV(op.to_ficv(self))),
-            UO(UO::CONST([x, y])) => UO(UO::CONST([x.recip(), y.recip()])),
-            UO(op) => UO(UO::INV(op.to_uicv(self))),
+            FOP(FOP::INV(_)) | UOP(UOP::INV(_)) => self.pop(),
+            FOP(FOP::CONST(c)) => FOP(FOP::CONST(c.recip())),
+            FOP(op) => FOP(FOP::INV(op.to_ficv(self))),
+            UOP(UOP::CONST([x, y])) => UOP(UOP::CONST([x.recip(), y.recip()])),
+            UOP(op) => UOP(UOP::INV(op.to_uicv(self))),
         }
     }
 
     #[inline]
     fn compile_mul(&mut self, sorted_ops: Vec<OP<M>>) -> OP<M> {
-        let mut const_out = FO(FO::CONST(1.0));
-        let mut out = FO(FO::CONST(1.0));
+        let mut const_out = FOP(FOP::CONST(1.0));
+        let mut out = FOP(FOP::CONST(1.0));
 
         for op in sorted_ops {
             match (out, op) {
-                (FO(FO::CONST(c0)), FO(FO::CONST(c1))) => {
-                    out = FO(FO::CONST(c0 * c1));
+                (FOP(FOP::CONST(c0)), FOP(FOP::CONST(c1))) => {
+                    out = FOP(FOP::CONST(c0 * c1));
                 }
-                (FO(FO::CONST(c0)), UO(UO::CONST([cx1, cy1]))) => {
-                    out = UO(UO::CONST([c0 * cx1, c0 * cy1]));
+                (FOP(FOP::CONST(c0)), UOP(UOP::CONST([cx1, cy1]))) => {
+                    out = UOP(UOP::CONST([c0 * cx1, c0 * cy1]));
                 }
-                (UO(UO::CONST([cx0, cy0])), UO(UO::CONST([cx1, cy1]))) => {
-                    out = UO(UO::CONST([cx0 * cx1, cy0 * cy1]));
+                (UOP(UOP::CONST([cx0, cy0])), UOP(UOP::CONST([cx1, cy1]))) => {
+                    out = UOP(UOP::CONST([cx0 * cx1, cy0 * cy1]));
                 }
-                (op1 @ (FO(FO::CONST(_)) | UO(UO::CONST(_))), op2 @ _) => {
+                (op1 @ (FOP(FOP::CONST(_)) | UOP(UOP::CONST(_))), op2 @ _) => {
                     const_out = op1;
                     out = op2;
                 }
-                (FO(fop0), FO(fop1)) => {
-                    out = FO(FO::MUL(fop0.to_ficv(self), fop1.to_ficv(self)));
+                (FOP(fop0), FOP(fop1)) => {
+                    out = FOP(FOP::MUL(fop0.to_ficv(self), fop1.to_ficv(self)));
                 }
-                (FO(fop0), UO(uop1)) => {
-                    out = UO(UO::MUL(fop0.to_ficv(self).into(), uop1.to_uicv(self)));
+                (FOP(fop0), UOP(uop1)) => {
+                    out = UOP(UOP::MUL(fop0.to_ficv(self).into(), uop1.to_uicv(self)));
                 }
-                (UO(uop0), UO(uop1)) => {
-                    out = UO(UO::MUL(uop0.to_uicv(self), uop1.to_uicv(self)));
+                (UOP(uop0), UOP(uop1)) => {
+                    out = UOP(UOP::MUL(uop0.to_uicv(self), uop1.to_uicv(self)));
                 }
                 _ => unreachable!(), //because of sorting
             }
         }
         match (const_out, out) {
-            (FO(FO::CONST(1.0)) | UO(UO::CONST([1.0, 1.0])), op1 @ _) => op1,
-            (FO(fop0), FO(fop1)) => FO(FO::MUL(fop0.to_ficv(self), fop1.to_ficv(self))),
-            (op0 @ (FO(_) | UO(_)), op1 @ (FO(_) | UO(_))) => UO(UO::MUL(
+            (FOP(FOP::CONST(1.0)) | UOP(UOP::CONST([1.0, 1.0])), op1 @ _) => op1,
+            (FOP(fop0), FOP(fop1)) => FOP(FOP::MUL(fop0.to_ficv(self), fop1.to_ficv(self))),
+            (op0 @ (FOP(_) | UOP(_)), op1 @ (FOP(_) | UOP(_))) => UOP(UOP::MUL(
                 op0.to_icv(self).try_into().unwrap(),
                 op1.to_icv(self).try_into().unwrap(),
-            )), // (UO(fop0), FO(uop1)) => UO(UO::MUL(fop0.to_uicv(self), uop1.to_uicv(self))),
-                // (UO(uop0), UO(uop1)) => UO(UO::MUL(uop0.to_uicv(self), uop1.to_uicv(self))),
+            )), // (UOP(fop0), FOP(uop1)) => UOP(UOP::MUL(fop0.to_uicv(self), uop1.to_uicv(self))),
+                // (UOP(uop0), UOP(uop1)) => UOP(UOP::MUL(uop0.to_uicv(self), uop1.to_uicv(self))),
         }
     }
 
     #[inline]
     fn compile_add(&mut self, sorted_ops: Vec<OP<M>>) -> OP<M> {
-        let mut const_out = FO(FO::CONST(0.0));
-        let mut out = FO(FO::CONST(0.0));
+        let mut const_out = FOP(FOP::CONST(0.0));
+        let mut out = FOP(FOP::CONST(0.0));
         // println!("SORTED {:?}", &sorted_ops);
         for op in sorted_ops {
             // println!("!!!!!!!! {:?} {:?}", &out, &op);
             match (out, op) {
-                (FO(FO::CONST(c0)), FO(FO::CONST(c1))) => {
-                    out = FO(FO::CONST(c0 + c1));
+                (FOP(FOP::CONST(c0)), FOP(FOP::CONST(c1))) => {
+                    out = FOP(FOP::CONST(c0 + c1));
                 }
-                (FO(FO::CONST(c0)), UO(UO::CONST([cx1, cy1]))) => {
-                    out = UO(UO::CONST([c0 + cx1, c0 + cy1]));
+                (FOP(FOP::CONST(c0)), UOP(UOP::CONST([cx1, cy1]))) => {
+                    out = UOP(UOP::CONST([c0 + cx1, c0 + cy1]));
                 }
-                (UO(UO::CONST([cx0, cy0])), UO(UO::CONST([cx1, cy1]))) => {
-                    out = UO(UO::CONST([cx0 + cx1, cy0 + cy1]));
+                (UOP(UOP::CONST([cx0, cy0])), UOP(UOP::CONST([cx1, cy1]))) => {
+                    out = UOP(UOP::CONST([cx0 + cx1, cy0 + cy1]));
                 }
-                (op1 @ (FO(FO::CONST(_)) | UO(UO::CONST(_))), op2 @ _) => {
+                (op1 @ (FOP(FOP::CONST(_)) | UOP(UOP::CONST(_))), op2 @ _) => {
                     const_out = op1;
                     out = op2;
                 }
-                (FO(fop0), FO(fop1)) => {
-                    out = FO(FO::ADD(fop0.to_ficv(self), fop1.to_ficv(self)));
+                (FOP(fop0), FOP(fop1)) => {
+                    out = FOP(FOP::ADD(fop0.to_ficv(self), fop1.to_ficv(self)));
                 }
-                (FO(fop0), UO(uop1)) => {
-                    out = UO(UO::ADD(fop0.to_ficv(self).into(), uop1.to_uicv(self)));
+                (FOP(fop0), UOP(uop1)) => {
+                    out = UOP(UOP::ADD(fop0.to_ficv(self).into(), uop1.to_uicv(self)));
                 }
-                (UO(uop0), UO(uop1)) => {
-                    out = UO(UO::ADD(uop0.to_uicv(self), uop1.to_uicv(self)));
+                (UOP(uop0), UOP(uop1)) => {
+                    out = UOP(UOP::ADD(uop0.to_uicv(self), uop1.to_uicv(self)));
                 }
                 _ => unreachable!(), //because of sorting
             }
         }
         match (const_out, out) {
-            (FO(FO::CONST(0.0)) | UO(UO::CONST([0.0, 0.0])), op1 @ _) => op1,
-            (FO(fop0), FO(fop1)) => FO(FO::ADD(fop0.to_ficv(self), fop1.to_ficv(self))),
-            (op0 @ (FO(_) | UO(_)), op1 @ (FO(_) | UO(_))) => UO(UO::ADD(
+            (FOP(FOP::CONST(0.0)) | UOP(UOP::CONST([0.0, 0.0])), op1 @ _) => op1,
+            (FOP(fop0), FOP(fop1)) => FOP(FOP::ADD(fop0.to_ficv(self), fop1.to_ficv(self))),
+            (op0 @ (FOP(_) | UOP(_)), op1 @ (FOP(_) | UOP(_))) => UOP(UOP::ADD(
                 op0.to_icv(self).try_into().unwrap(),
                 op1.to_icv(self).try_into().unwrap(),
-            )), // (FO(fop0), UO(uop1)) => UO(UO::ADD(fop0.to_uicv(self), uop1.to_uicv(self))),
-                // (UO(fop0), FO(uop1)) => UO(UO::ADD(fop0.to_uicv(self), uop1.to_uicv(self))),
-                // (UO(uop0), UO(uop1)) => UO(UO::ADD(uop0.to_uicv(self), uop1.to_uicv(self))),
+            )), // (FOP(fop0), UOP(uop1)) => UOP(UOP::ADD(fop0.to_uicv(self), uop1.to_uicv(self))),
+                // (UOP(fop0), FOP(uop1)) => UOP(UOP::ADD(fop0.to_uicv(self), uop1.to_uicv(self))),
+                // (UOP(uop0), UOP(uop1)) => UOP(UOP::ADD(uop0.to_uicv(self), uop1.to_uicv(self))),
         }
     }
 
@@ -388,11 +388,11 @@ impl<M: Module> CExpr<M> {
             F::I(_) => {
                 let op = self.pop();
                 match op {
-                    FO(FO::ADD(l, r)) => {
+                    FOP(FOP::ADD(l, r)) => {
                         self.push_fadd_leaf(ops, r);
                         self.push_fadd_leaf(ops, l);
                     }
-                    UO(UO::ADD(l, r)) => {
+                    UOP(UOP::ADD(l, r)) => {
                         self.push_uadd_leaf(ops, r);
                         self.push_uadd_leaf(ops, l);
                     }
@@ -401,8 +401,8 @@ impl<M: Module> CExpr<M> {
                     }
                 }
             }
-            F::CONST(c) => ops.push(FO(FO::CONST(c))),
-            F::VAR(v) => ops.push(FO(FO::VAR(v))),
+            F::CONST(c) => ops.push(FOP(FOP::CONST(c))),
+            F::VAR(v) => ops.push(FOP(FOP::VAR(v))),
         };
     }
     fn push_uadd_leaf(&mut self, ops: &mut Vec<OP<M>>, icv: U) {
@@ -411,11 +411,11 @@ impl<M: Module> CExpr<M> {
             U::I(_) => {
                 let op = self.pop();
                 match op {
-                    UO(UO::ADD(l, r)) => {
+                    UOP(UOP::ADD(l, r)) => {
                         self.push_uadd_leaf(ops, r);
                         self.push_uadd_leaf(ops, l);
                     }
-                    FO(FO::ADD(l, r)) => {
+                    FOP(FOP::ADD(l, r)) => {
                         self.push_fadd_leaf(ops, r);
                         self.push_fadd_leaf(ops, l);
                     }
@@ -425,8 +425,8 @@ impl<M: Module> CExpr<M> {
                 }
             }
             U::F(ficv) => self.push_fadd_leaf(ops, ficv),
-            U::CONST(c) => ops.push(UO(UO::CONST(c))),
-            U::VAR(v) => ops.push(UO(UO::VAR(v))),
+            U::CONST(c) => ops.push(UOP(UOP::CONST(c))),
+            U::VAR(v) => ops.push(UOP(UOP::VAR(v))),
         };
     }
 
@@ -436,11 +436,11 @@ impl<M: Module> CExpr<M> {
             F::I(_) => {
                 let op = self.pop();
                 match op {
-                    FO(FO::MUL(l, r)) => {
+                    FOP(FOP::MUL(l, r)) => {
                         self.push_fmul_leaf(ops, r);
                         self.push_fmul_leaf(ops, l);
                     }
-                    UO(UO::MUL(l, r)) => {
+                    UOP(UOP::MUL(l, r)) => {
                         self.push_umul_leaf(ops, r);
                         self.push_umul_leaf(ops, l);
                     }
@@ -449,8 +449,8 @@ impl<M: Module> CExpr<M> {
                     }
                 }
             }
-            F::CONST(c) => ops.push(FO(FO::CONST(c))),
-            F::VAR(v) => ops.push(FO(FO::VAR(v))),
+            F::CONST(c) => ops.push(FOP(FOP::CONST(c))),
+            F::VAR(v) => ops.push(FOP(FOP::VAR(v))),
         };
     }
 
@@ -460,11 +460,11 @@ impl<M: Module> CExpr<M> {
             U::I(_) => {
                 let op = self.pop();
                 match op {
-                    UO(UO::MUL(l, r)) => {
+                    UOP(UOP::MUL(l, r)) => {
                         self.push_umul_leaf(ops, r);
                         self.push_umul_leaf(ops, l);
                     }
-                    FO(FO::MUL(l, r)) => {
+                    FOP(FOP::MUL(l, r)) => {
                         self.push_fmul_leaf(ops, r);
                         self.push_fmul_leaf(ops, l);
                     }
@@ -474,8 +474,8 @@ impl<M: Module> CExpr<M> {
                 }
             }
             U::F(ficv) => self.push_fmul_leaf(ops, ficv),
-            U::CONST(c) => ops.push(UO(UO::CONST(c))),
-            U::VAR(v) => ops.push(UO(UO::VAR(v))),
+            U::CONST(c) => ops.push(UOP(UOP::CONST(c))),
+            U::VAR(v) => ops.push(UOP(UOP::VAR(v))),
         };
     }
 }
@@ -619,7 +619,7 @@ impl<M: Module> Compiler<M> for ExprSlice<'_> {
                 //             if c != 0.0 {
                 //                 return Ok(instr);
                 //             }
-                //             // out = instr;     // Skip this 0 value (mostly so FO don't complicate my logic in 'if out_set' since FO can assume that any set value is non-const).
+                //             // out = instr;     // Skip this 0 value (mostly so FOP don't complicate my logic in 'if out_set' since FOP can assume that any set value is non-const).
                 //             // out_set = true;
                 //         } else {
                 //             out = instr;
@@ -665,11 +665,11 @@ impl<M: Module> Compiler<M> for ExprSlice<'_> {
                 for xs in xss {
                     let op = xs.compile(ast, cexpr, module)?;
                     match op {
-                        FO(FO::ADD(licv, ricv)) => {
+                        FOP(FOP::ADD(licv, ricv)) => {
                             cexpr.push_fadd_leaf(&mut ops, ricv);
                             cexpr.push_fadd_leaf(&mut ops, licv);
                         }
-                        UO(UO::ADD(licv, ricv)) => {
+                        UOP(UOP::ADD(licv, ricv)) => {
                             cexpr.push_uadd_leaf(&mut ops, ricv);
                             cexpr.push_uadd_leaf(&mut ops, licv);
                         }
@@ -707,11 +707,11 @@ impl<M: Module> Compiler<M> for ExprSlice<'_> {
                 for xs in xss {
                     let op = xs.compile(ast, cexpr, module)?;
                     match op {
-                        FO(FO::MUL(licv, ricv)) => {
+                        FOP(FOP::MUL(licv, ricv)) => {
                             cexpr.push_fmul_leaf(&mut ops, ricv);
                             cexpr.push_fmul_leaf(&mut ops, licv);
                         }
-                        UO(UO::MUL(licv, ricv)) => {
+                        UOP(UOP::MUL(licv, ricv)) => {
                             cexpr.push_umul_leaf(&mut ops, ricv);
                             cexpr.push_umul_leaf(&mut ops, licv);
                         }
@@ -744,7 +744,7 @@ impl<M: Module> Compiler<M> for ExprSlice<'_> {
             Rem => {
                 let mut xss = Vec::<ExprSlice>::with_capacity(2);
                 self.split(Rem, &mut xss);
-                let mut out = FO(FO::CONST(0.0));
+                let mut out = FOP(FOP::CONST(0.0));
                 let mut out_set = false;
                 for xs in xss.iter() {
                     let op = xs.compile(ast, cexpr, module)?;
@@ -753,17 +753,17 @@ impl<M: Module> Compiler<M> for ExprSlice<'_> {
                         let ricv = op.to_icv(cexpr);
                         match (licv, ricv) {
                             (F(F::CONST(dividend)), F(F::CONST(divisor))) => {
-                                FO(FO::CONST(f64::rem(dividend, divisor)))
+                                FOP(FOP::CONST(f64::rem(dividend, divisor)))
                             }
-                            (F(lficv), F(rficv)) => FO(FO::REM(lficv, rficv)),
+                            (F(lficv), F(rficv)) => FOP(FOP::REM(lficv, rficv)),
                             (licv @ (F(_) | U(_)), ricv @ (U(_) | F(_))) => {
                                 let luicv = licv.try_into().unwrap();
                                 let ruicv = ricv.try_into().unwrap();
-                                UO(match (luicv, ruicv) {
+                                UOP(match (luicv, ruicv) {
                                     (U::CONST(dividend), U::CONST(divisor)) => {
-                                        UO::CONST(<[f64; 2]>::rem(dividend, divisor))
+                                        UOP::CONST(<[f64; 2]>::rem(dividend, divisor))
                                     }
-                                    _ => UO::REM(luicv, ruicv),
+                                    _ => UOP::REM(luicv, ruicv),
                                 })
                             }
                             _ => unreachable!(),
@@ -778,28 +778,28 @@ impl<M: Module> Compiler<M> for ExprSlice<'_> {
             Exp => {
                 let mut xss = Vec::<ExprSlice>::with_capacity(2);
                 self.split(Exp, &mut xss);
-                let mut out = FO(FO::CONST(0.0));
+                let mut out = FOP(FOP::CONST(0.0));
                 let mut out_set = false;
                 // Right-to-Left Associativity
                 for xs in xss.into_iter().rev() {
                     let op = xs.compile(ast, cexpr, module)?;
                     if out_set {
                         match (out, op) {
-                            (FO(FO::CONST(power)), FO(FO::CONST(base))) => {
-                                out = FO(FO::CONST(base.powf(power)));
+                            (FOP(FOP::CONST(power)), FOP(FOP::CONST(base))) => {
+                                out = FOP(FOP::CONST(base.powf(power)));
                             }
-                            (FO(power), FO(base)) => {
-                                out = FO(FO::EXP(base.to_ficv(cexpr), power.to_ficv(cexpr)));
+                            (FOP(power), FOP(base)) => {
+                                out = FOP(FOP::EXP(base.to_ficv(cexpr), power.to_ficv(cexpr)));
                             }
-                            (power @ (FO(_) | UO(_)), base @ (UO(_) | FO(_))) => {
+                            (power @ (FOP(_) | UOP(_)), base @ (UOP(_) | FOP(_))) => {
                                 let base = base.to_icv(cexpr).try_into().unwrap();
                                 let power = power.to_icv(cexpr).try_into().unwrap();
 
-                                out = UO(match (base, power) {
+                                out = UOP(match (base, power) {
                                     (U::CONST(base), U::CONST(power)) => {
-                                        UO::CONST(<[f64; 2]>::pow(base, power))
+                                        UOP::CONST(<[f64; 2]>::pow(base, power))
                                     }
-                                    _ => UO::EXP(base, power),
+                                    _ => UOP::EXP(base, power),
                                 });
                             }
                         }
@@ -842,22 +842,22 @@ impl<M: Module> Compiler<M> for UnaryOp {
 impl<M: Module> Compiler<M> for ECV {
     fn compile(&self, ast: &Ast, cexpr: &mut CExpr<M>, module: &M) -> Result<OP<M>, Error> {
         match self {
-            Const(c) => Ok(FO(FO::CONST(*c))),
+            Const(c) => Ok(FOP(FOP::CONST(*c))),
             Var(name) => {
                 if let Some(op) = module.dispatch_var(name) {
                     match op {
-                        F(F::CONST(c)) => Ok(FO(FO::CONST(*c))),
-                        F(F::VAR(v)) => Ok(FO(FO::VAR(*v))),
-                        U(U::CONST(c)) => Ok(UO(UO::CONST(*c))),
-                        U(U::VAR(v)) => Ok(UO(UO::VAR(*v))),
+                        F(F::CONST(c)) => Ok(FOP(FOP::CONST(*c))),
+                        F(F::VAR(v)) => Ok(FOP(FOP::VAR(*v))),
+                        U(U::CONST(c)) => Ok(UOP(UOP::CONST(*c))),
+                        U(U::VAR(v)) => Ok(UOP(UOP::VAR(*v))),
                         _ => Err(Error::Undefined(name.to_owned())),
                     }
                 } else {
                     match name.as_str() {
                         // builtins constants
-                        "PI" => Ok(FO(FO::CONST(f64::PI))),
-                        "E" => Ok(FO(FO::CONST(f64::E))),
-                        "EPS" => Ok(FO(FO::CONST(f64::EPSILON))),
+                        "PI" => Ok(FOP(FOP::CONST(f64::PI))),
+                        "E" => Ok(FOP(FOP::CONST(f64::E))),
+                        "EPS" => Ok(FOP(FOP::CONST(f64::EPSILON))),
                         _ => Err(Error::Undefined(name.to_owned())),
                     }
                 }
@@ -895,14 +895,14 @@ impl<M: Module> Compiler<M> for Value {
                 //     let then = then.compile(ast, cexpr)?;
                 //     let else_ = else_.compile(ast, cexpr)?;
                 //     match (cond, then, else_) {
-                //         (FO(FO::CONST(0.0)), _, a2) => Ok(a2),
-                //         (FO(FO::CONST(_)), a1, _) => Ok(a1),
-                //         (FO(cond), FO(a1), FO(a2)) => Ok(FO(FIF(
+                //         (FOP(FOP::CONST(0.0)), _, a2) => Ok(a2),
+                //         (FOP(FOP::CONST(_)), a1, _) => Ok(a1),
+                //         (FOP(cond), FOP(a1), FOP(a2)) => Ok(FOP(FIF(
                 //             cond.to_icv(cexpr),
                 //             a1.to_icv(cexpr),
                 //             a2.to_icv(cexpr),
                 //         ))),
-                //         (FO(cond), UO(a1), UO(a2)) => Ok(UO(UIF(
+                //         (FOP(cond), UOP(a1), UOP(a2)) => Ok(UOP(UIF(
                 //             cond.to_icv(cexpr),
                 //             a1.to_icv(cexpr),
                 //             a2.to_icv(cexpr),
@@ -927,11 +927,11 @@ impl<M: Module> Compiler<M> for Value {
                 //}
             }
             List(vals) => match &vals.as_slice() {
-                &[ECV::Const(cx), ECV::Const(cy)] => Ok(UO(UO::CONST([*cx, *cy]))),
+                &[ECV::Const(cx), ECV::Const(cy)] => Ok(UOP(UOP::CONST([*cx, *cy]))),
                 &[x, y] => {
-                    let x: FO<M::FFN> = x.compile(ast, cexpr, module)?.try_into()?;
-                    let y: FO<M::FFN> = y.compile(ast, cexpr, module)?.try_into()?;
-                    Ok(UO(UO::SET(x.to_ficv(cexpr), y.to_ficv(cexpr))))
+                    let x: FOP<M::FFN> = x.compile(ast, cexpr, module)?.try_into()?;
+                    let y: FOP<M::FFN> = y.compile(ast, cexpr, module)?.try_into()?;
+                    Ok(UOP(UOP::SET(x.to_ficv(cexpr), y.to_ficv(cexpr))))
                 }
                 _ => Err(Error::InvalidSyntax(
                     "The vector must be 2 to 3 elements long".into(),

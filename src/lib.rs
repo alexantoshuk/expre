@@ -176,13 +176,13 @@ let resolver = expre::parse()
 //                 #[inline]
 //                 fn dispatch_func(&self, name: &str, args: &[ICV]) -> Option<OP<Self::FFN, Self::UFN>>{
 //                     match (name, args) {
-//                         $(($fstr_, &[$($fargty_($fargname_)),*]) => {Some(FO(FO::FN(Self::FFN::$fname_($($farg_.into()),*))))})*
-//                         $(("$fname", &[$($fargty(F::CONST($fargname))),*]) => {Some(FO(FO::CONST(f64::$fname($($fargname),*))))})*
-//                         $(("$fname", &[$($fargty($fargname)),*]) => {Some(FO(FO::FN(Self::FFN::$fname($($farg.into()),*))))})*
+//                         $(($fstr_, &[$($fargty_($fargname_)),*]) => {Some(FOP(FOP::FN(Self::FFN::$fname_($($farg_.into()),*))))})*
+//                         $(("$fname", &[$($fargty(F::CONST($fargname))),*]) => {Some(FOP(FOP::CONST(f64::$fname($($fargname),*))))})*
+//                         $(("$fname", &[$($fargty($fargname)),*]) => {Some(FOP(FOP::FN(Self::FFN::$fname($($farg.into()),*))))})*
 
-//                         $(($ustr_, &[$($uargty_($uargname_)),*]) => {Some(UO(UO::FN(Self::UFN::$uname_($($uarg_.into()),*))))})*
-//                         $(($ustr, &[$($uargname @ (F(F::CONST(_)) | U(U::CONST(_)))),*]) => {Some(UO(UO::CONST(<[f64;2]>::$uname($($uargname.into()),*))))})*
-//                         $(($ustr, &[$($uargty($uargname)),*]) => {Some(UO(UO::FN(Self::UFN::$uname($($uarg.into()),*))))})*
+//                         $(($ustr_, &[$($uargty_($uargname_)),*]) => {Some(UOP(UOP::FN(Self::UFN::$uname_($($uarg_.into()),*))))})*
+//                         $(($ustr, &[$($uargname @ (F(F::CONST(_)) | U(U::CONST(_)))),*]) => {Some(UOP(UOP::CONST(<[f64;2]>::$uname($($uargname.into()),*))))})*
+//                         $(($ustr, &[$($uargty($uargname)),*]) => {Some(UOP(UOP::FN(Self::UFN::$uname($($uarg.into()),*))))})*
 //                         _ => None,
 //                     }
 //                 }
@@ -263,13 +263,13 @@ macro_rules! module {
                 #[inline]
                 fn dispatch_func(&self, name: &str, args: &[ICV]) -> Option<OP<Self::FFN, Self::UFN>>{
                     match (name, args) {
-                        $((stringify!($fname_), &[$($fargty_($fargname_)),*]) => {Some(FO(FO::FN(Self::FFN::$fname2_($($fargname2_.into()),*))))})*
-                        $((stringify!($fname), &[$(ref $fargname @ (F(F::CONST(_)) | $fargty($fargty::CONST(_)))),*]) => {Some(FO(FO::CONST(f64::$fname($($fargname.clone().try_into().unwrap()),*))))})*
-                        $((stringify!($fname), &[$($fargty($fargname)),*]) => {Some(FO(FO::FN(Self::FFN::$fname($($fargname.into()),*))))})*
+                        $((stringify!($fname_), &[$($fargty_($fargname_)),*]) => {Some(FOP(FOP::FN(Self::FFN::$fname2_($($fargname2_.into()),*))))})*
+                        $((stringify!($fname), &[$(ref $fargname @ (F(F::CONST(_)) | $fargty($fargty::CONST(_)))),*]) => {Some(FOP(FOP::CONST(f64::$fname($($fargname.clone().try_into().unwrap()),*))))})*
+                        $((stringify!($fname), &[$($fargty($fargname)),*]) => {Some(FOP(FOP::FN(Self::FFN::$fname($($fargname.into()),*))))})*
 
-                        $((stringify!($uname_), &[$($uargty_($uargname_)),*]) => {Some(FO(FO::FN(Self::FFN::$uname2_($($uargname2_.into()),*))))})*
-                        $((stringify!($uname), &[$(ref $uargname @ (F(F::CONST(_)) | $uargty($uargty::CONST(_)))),*]) => {Some(UO(UO::CONST(<[f64;2]>::$uname($($uargname.clone().try_into().unwrap()),*))))})*
-                        $((stringify!($uname), &[$($uargty($uargname)),*]) => {Some(UO(UO::FN(Self::UFN::$uname($($uargname.into()),*))))})*
+                        $((stringify!($uname_), &[$($uargty_($uargname_)),*]) => {Some(FOP(FOP::FN(Self::FFN::$uname2_($($uargname2_.into()),*))))})*
+                        $((stringify!($uname), &[$(ref $uargname @ (F(F::CONST(_)) | $uargty($uargty::CONST(_)))),*]) => {Some(UOP(UOP::CONST(<[f64;2]>::$uname($($uargname.clone().try_into().unwrap()),*))))})*
+                        $((stringify!($uname), &[$($uargty($uargname)),*]) => {Some(UOP(UOP::FN(Self::UFN::$uname($($uargname.into()),*))))})*
 
                         _ => None,
                     }

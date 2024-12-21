@@ -7,7 +7,7 @@ use std::hash::Hash;
 // pub trait Context: Sized + Clone + Debug {
 //     type FFN: Eq + PartialEq + Hash + Debug; // + FEvaler;
 //     type UFN: Eq + PartialEq + Hash + Debug; // + UEvaler;
-//     type FO: Float;
+//     type FOP: Float;
 
 //     fn var(_name: &str) -> Option<OP<Self>> {
 //         None
@@ -17,16 +17,16 @@ use std::hash::Hash;
 //         None
 //     }
 
-//     fn get_fvar(&self, offset: usize) -> Self::FO {
-//         unsafe { *((self as *const Self as *const Self::FO).add(offset)) }
+//     fn get_fvar(&self, offset: usize) -> Self::FOP {
+//         unsafe { *((self as *const Self as *const Self::FOP).add(offset)) }
 //     }
 
-//     fn get_uvar(&self, offset: usize) -> [Self::FO; 2] {
-//         unsafe { *((self as *const Self as *const Self::FO).add(offset) as *const [Self::FO; 2]) }
+//     fn get_uvar(&self, offset: usize) -> [Self::FOP; 2] {
+//         unsafe { *((self as *const Self as *const Self::FOP).add(offset) as *const [Self::FOP; 2]) }
 //     }
 
-//     fn get_vvar(&self, offset: usize) -> [Self::FO; 3] {
-//         unsafe { *((self as *const Self as *const Self::FO).add(offset) as *const [Self::FO; 3]) }
+//     fn get_vvar(&self, offset: usize) -> [Self::FOP; 3] {
+//         unsafe { *((self as *const Self as *const Self::FOP).add(offset) as *const [Self::FOP; 3]) }
 //     }
 // }
 
@@ -36,6 +36,13 @@ use std::hash::Hash;
 //     fn dispatch(_name: &str, _sargs: Option<&str>, _args: &[ICV]) -> Option<Self>;
 //     fn func(&self) -> impl FnOnce() -> Self::Output;
 // }
+
+pub trait FFunc: Eq + PartialEq + Hash + Clone + Debug {
+    fn dispatch(_name: &str, _args: &[ICV]) -> Option<FOP<Self>>;
+}
+pub trait UFunc: Eq + PartialEq + Hash + Clone + Debug {
+    fn dispatch(_name: &str, _args: &[ICV]) -> Option<UOP<Self>>;
+}
 
 pub trait Module: Sized + Clone + Debug {
     type FFN: Eq + PartialEq + Hash + Clone + Debug;
@@ -87,15 +94,15 @@ pub trait Context<T: Float>: Sized + Clone + Debug {
 // impl Context for Std {
 //     type FFN = FStdFunc;
 //     type UFN = UStdFunc;
-//     type FO = f32;
+//     type FOP = f32;
 
 //     /// Get the const or var associated with the given `name`
 //     #[inline]
 //     fn var(name: &str) -> Option<OP<Self>> {
 //         match name {
-//             "PI" => Some(FO(FO::CONST(f64::PI))),
-//             "E" => Some(FO(FO::CONST(f64::E))),
-//             "EPS" => Some(FO(FO::CONST(f64::EPSILON))),
+//             "PI" => Some(FOP(FOP::CONST(f64::PI))),
+//             "E" => Some(FOP(FOP::CONST(f64::E))),
+//             "EPS" => Some(FOP(FOP::CONST(f64::EPSILON))),
 //             _ => None,
 //         }
 //     }
@@ -104,8 +111,8 @@ pub trait Context<T: Float>: Sized + Clone + Debug {
 //     #[inline]
 //     fn func(name: &str, sarg: Option<&str>, args: &[ICV]) -> Option<OP<Self>> {
 //         match (name, sarg, args) {
-//             ("sin", None, &[F(icv)]) => Some(FO(FO::FN(Self::FFN::SIN(icv)))),
-//             ("sin", None, &[U(icv)]) => Some(UO(UO::FN(Self::UFN::SIN(icv)))),
+//             ("sin", None, &[F(icv)]) => Some(FOP(FOP::FN(Self::FFN::SIN(icv)))),
+//             ("sin", None, &[U(icv)]) => Some(UOP(UOP::FN(Self::UFN::SIN(icv)))),
 //             _ => None,
 //         }
 //     }
@@ -123,7 +130,7 @@ pub trait Context<T: Float>: Sized + Clone + Debug {
 //     #[inline]
 //     fn var(name: &str) -> Option<OP<Self>> {
 //         match name {
-//             "id" => Some(FO(FO::VAR(123))),
+//             "id" => Some(FOP(FOP::VAR(123))),
 //             _ => Std::var(name),
 //         }
 //     }

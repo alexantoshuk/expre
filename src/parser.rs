@@ -136,7 +136,7 @@ pub(crate) type ExprPair = (BinaryOp, Value);
 ///
 /// It can be `compile()`d or `eval()`d.
 #[derive(PartialEq, Debug)]
-pub struct Expr(
+pub(crate) struct Expr(
     pub Value,
     pub Vec<ExprPair>, // cap=8
 );

@@ -9,8 +9,8 @@ use indexmap::{IndexMap, IndexSet};
 
 #[derive(Debug, Copy, Clone, PartialEq)]
 pub enum Value<T> {
-    FO(T),
-    UO([T; 2]),
+    FOP(T),
+    UOP([T; 2]),
     // V([T; 3]),
 }
 
@@ -24,8 +24,8 @@ where
         M::UFN: UEvaler<M, T, CTX>,
     {
         match self.ops.last().unwrap() {
-            FO(fop) => Value::FO(fop.eval(self, ctx)),
-            UO(uop) => Value::UO(uop.eval(self, ctx)),
+            FOP(fop) => Value::FOP(fop.eval(self, ctx)),
+            UOP(uop) => Value::UOP(uop.eval(self, ctx)),
         }
     }
 
@@ -35,8 +35,8 @@ where
         M::UFN: UEvaler<M, T, CTX>,
     {
         match self.ops.last().unwrap() {
-            FO(fop) => fop.eval(self, ctx),
-            UO(uop) => uop.eval(self, ctx)[0],
+            FOP(fop) => fop.eval(self, ctx),
+            UOP(uop) => uop.eval(self, ctx)[0],
         }
     }
 
@@ -46,8 +46,8 @@ where
         M::UFN: UEvaler<M, T, CTX>,
     {
         match self.ops.last().unwrap() {
-            UO(uop) => uop.eval(self, ctx),
-            FO(fop) => [fop.eval(self, ctx); 2],
+            UOP(uop) => uop.eval(self, ctx),
+            FOP(fop) => [fop.eval(self, ctx); 2],
         }
     }
 }
@@ -115,8 +115,8 @@ where
             Self::CONST(c) => T::from_f64(*c),
             Self::VAR(offset) => ctx.get_fvar(*offset),
             Self::I(i) => match cexpr.get(*i) {
-                FO(fop) => fop.eval(cexpr, ctx),
-                // UO(uop) => uop.eval(cexpr, ctx)[0],
+                FOP(fop) => fop.eval(cexpr, ctx),
+                // UOP(uop) => uop.eval(cexpr, ctx)[0],
                 _ => unreachable!(),
             },
         }
@@ -137,8 +137,8 @@ where
             Self::CONST([x, y]) => [T::from_f64(*x), T::from_f64(*y)],
             Self::VAR(offset) => ctx.get_uvar(*offset),
             Self::I(i) => match cexpr.get(*i) {
-                UO(uop) => uop.eval(cexpr, ctx),
-                // FO(fop) => [fop.eval(cexpr, ctx); 2],
+                UOP(uop) => uop.eval(cexpr, ctx),
+                // FOP(fop) => [fop.eval(cexpr, ctx); 2],
                 _ => unreachable!(),
             },
             Self::F(ficv) => [ficv.eval(cexpr, ctx); 2],
@@ -146,7 +146,7 @@ where
     }
 }
 
-impl<M, T, CTX> FEvaler<M, T, CTX> for FO<M::FFN>
+impl<M, T, CTX> FEvaler<M, T, CTX> for FOP<M::FFN>
 where
     M: Module,
     T: Float,
@@ -158,14 +158,12 @@ where
     fn eval(&self, cexpr: &CExpr<M>, ctx: &CTX) -> T {
         let zero = T::ZERO;
         match self {
-            // FI have manually ordered these match arms in a way that FI feel should deliver good performance.
-            // (FI don't think this ordering actually affects the generated code, though.)s
             Self::MUL(licv, ricv) => T::mul(licv.eval(cexpr, ctx), ricv.eval(cexpr, ctx)),
             Self::ADD(licv, ricv) => T::add(licv.eval(cexpr, ctx), ricv.eval(cexpr, ctx)),
-            Self::REM(licv, ricv) => T::rem(licv.eval(cexpr, ctx), ricv.eval(cexpr, ctx)),
-            Self::EXP(base, power) => T::pow(base.eval(cexpr, ctx), power.eval(cexpr, ctx)),
             Self::NEG(icv) => T::neg(icv.eval(cexpr, ctx)),
             Self::INV(icv) => T::recip(icv.eval(cexpr, ctx)),
+            Self::REM(licv, ricv) => T::rem(licv.eval(cexpr, ctx), ricv.eval(cexpr, ctx)),
+            Self::EXP(base, power) => T::pow(base.eval(cexpr, ctx), power.eval(cexpr, ctx)),
 
             // Self::EQ(licv, ricv) => (licv.eval(cexpr, ctx) == ricv.eval(cexpr, ctx)).into(),
             // Self::NE(licv, ricv) => (licv.eval(cexpr, ctx) != ricv.eval(cexpr, ctx)).into(),
@@ -199,7 +197,7 @@ where
     }
 }
 
-impl<M, T, CTX> UEvaler<M, T, CTX> for UO<M::UFN>
+impl<M, T, CTX> UEvaler<M, T, CTX> for UOP<M::UFN>
 where
     M: Module,
     T: Float,
@@ -250,12 +248,12 @@ mod test {
         // impl Module for Data {
         //     type FFN = ();
         //     type UFN = ();
-        //     type FO = f32;
+        //     type FOP = f32;
         //     fn var(name: &str) -> Option<OP<Self>> {
         //         match name {
-        //             "id" => Some(FO(FO::VAR(0))),
-        //             "b" => Some(FO(FO::VAR(1))),
-        //             "uv" => Some(UO(UO::VAR(2))),
+        //             "id" => Some(FOP(FOP::VAR(0))),
+        //             "b" => Some(FOP(FOP::VAR(1))),
+        //             "uv" => Some(UOP(UOP::VAR(2))),
         //             _ => None,
         //         }
         //     }
@@ -331,7 +329,7 @@ mod test {
 
         let v = cexpr.eval(&ctx);
         println!("CEXPR:\n{:?}", cexpr);
-        assert_eq!(Value::FO(88956.0), v);
+        assert_eq!(Value::FOP(88956.0), v);
 
         // let expr_str = "a=((1+-5.345) +4 +xxxxxxxx +5)-xxxxxxxx;a +((((87))) - tan(xxxxxxxx)) + 1.3446346346346324e-2 + (97 + (((15 / 55*xxxxxxxx * ((sin(-31))) + 35))) + (15 - (cos(9))) - (39 / 26) / 20*cos(yyyyyyyyyyyyy) / 91 +(abs(-xxxxxxxx))+ 27 / (33 * sin(26) + 28-(yyyyyyyyyyyyy) - a*a+(7) / 10*tan(yyyyyyyyyyyyy) + 66 * 6) + sin(60) / 35 - ((29) - (cos(69)) / 44 / (92)) / (cos(89)) + 2 + 87 / 47 * ((2)) * 83 / 98 * 42 / (((67)) * ((97))) / (34 / 89 + 77) - 29 + 70 * (20)) + ((((((92))) + 23 * (98) / (95) + (((99) * (41))) + (5 + 41) + 10) - (36) / (6 + 80 * 52 + (90))))";
         // eprintln!("Test expr: '{}'\n", expr_str);
@@ -357,7 +355,7 @@ mod test {
 
         // let v = cexpr.eval();
         // println!("{:?}", cexpr);
-        // assert_eq!(Value::FO(5807.369321620128), v);
+        // assert_eq!(Value::FOP(5807.369321620128), v);
     }
 }
 
@@ -367,9 +365,9 @@ mod test {
 //             F("sin", x:F) => sin(x),
 //             F("cos", x:F) => cos(x),
 //             F("clamp", x:F, min:F, max:F) => clamp(x,min,max),
-//             // ("rand", min:FO, max:FO, seed:FO) => rand(min,max,seed),
-//             // ("rand", min:FO, max:FO) => rand(min,max,var("seed")),
-//             // ("rand", seed:FO) => rand(0.0,1.0,seed),
+//             // ("rand", min:FOP, max:FOP, seed:FOP) => rand(min,max,seed),
+//             // ("rand", min:FOP, max:FOP) => rand(min,max,var("seed")),
+//             // ("rand", seed:FOP) => rand(0.0,1.0,seed),
 //             // ("rand") => rand(0.0,1.0,var("seed")),
 //             F("clamp", x:F) => clamp(x, 0.0, F::VAR(1)),
 //         },
