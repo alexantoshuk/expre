@@ -194,7 +194,7 @@ let resolver = expre::parse()
 //                 CTX: Context<T>,
 //             {
 //                 #[inline]
-//                 fn eval(&self, cexpr: &CExpr<$module_name>, ctx: &CTX) -> T {
+//                 fn eval(&self, cexpr: &Engine<$module_name>, ctx: &CTX) -> T {
 //                     match self {
 //                         $(Self::$fname($($fargname),*) => {T::$fname($($fargname.eval(cexpr, ctx)),*)})*
 //                         _=> T::ZERO
@@ -208,7 +208,7 @@ let resolver = expre::parse()
 //                 CTX: Context<T>,
 //             {
 //                 #[inline]
-//                 fn eval(&self, cexpr: &CExpr<$module_name>, ctx: &CTX) -> [T;2] {
+//                 fn eval(&self, cexpr: &Engine<$module_name>, ctx: &CTX) -> [T;2] {
 //                     match self {
 //                         $(Self::$uname($($uargname),*) => {<[T;2]>::$uname($($uargname.eval(cexpr, ctx)),*)})*
 //                         _=> [T::ZERO;2]
@@ -219,16 +219,15 @@ let resolver = expre::parse()
 //     };
 // }
 
-#[macro_export]
-macro_rules! module {
+macro_rules! _module {
     ($pub:vis $module_name:ident<$T:ty> {
         $(F::$fname:ident($($fargname:ident : $fargty:ty),*);)*
         $(@F::$fname_:ident($($fargname_:ident : $fargty_:ty),*) => $fname2_:ident($($fargname2_:expr),*);)*
         $(U::$uname:ident($($uargname:ident : $uargty:ty),*);)*
         $(@U::$uname_:ident($($uargname_:ident : $uargty_:ty),*) => $uname2_:ident($($uargname2_:expr),*);)*
-
     }) => {
         use paste::paste;
+
         paste!{
             #[derive(Eq, PartialEq, Hash, Clone, Debug)]
             $pub enum [<$module_name F>] {
@@ -246,7 +245,11 @@ macro_rules! module {
             }
 
             impl $module_name {
-                pub fn new(vars:IndexMap<String,ICV>)-> Self {
+                pub fn new()-> Self {
+                    Self {vars: IndexMap::new()}
+                }
+
+                pub fn with_vars(vars:IndexMap<String,ICV>)-> Self {
                     Self {vars}
                 }
             }
@@ -281,7 +284,7 @@ macro_rules! module {
                 CTX: Context<$T>,
             {
                 #[inline]
-                fn eval(&self, cexpr: &CExpr<$module_name>, ctx: &CTX) -> $T {
+                fn eval(&self, cexpr: &Engine<$module_name>, ctx: &CTX) -> $T {
                     match self {
                         $(Self::$fname($($fargname),*) => {$T::$fname($($fargname.eval(cexpr, ctx)),*)})*
                         _=> unreachable!(),
@@ -294,12 +297,71 @@ macro_rules! module {
                 CTX: Context<$T>,
             {
                 #[inline]
-                fn eval(&self, cexpr: &CExpr<$module_name>, ctx: &CTX) -> [$T;2] {
+                fn eval(&self, cexpr: &Engine<$module_name>, ctx: &CTX) -> [$T;2] {
                     match self {
                         $(Self::$uname($($uargname),*) => {<[$T;2]>::$uname($($uargname.eval(cexpr, ctx)),*)})*
                         _=> unreachable!(),
                     }
                 }
+            }
+        }
+    };
+}
+
+pub(crate) use _module;
+
+#[macro_export]
+macro_rules! module {
+    ($pub:vis $module_name:ident<$T:ty> {
+        $(F::$fname:ident($($fargname:ident : $fargty:ty),*);)*
+        $(@F::$fname_:ident($($fargname_:ident : $fargty_:ty),*) => $fname2_:ident($($fargname2_:expr),*);)*
+        $(U::$uname:ident($($uargname:ident : $uargty:ty),*);)*
+        $(@U::$uname_:ident($($uargname_:ident : $uargty_:ty),*) => $uname2_:ident($($uargname2_:expr),*);)*
+    }) => {
+        crate::_module! {
+            $pub $module_name<$T> {
+                F::floor(x:F);
+                F::ceil(x:F);
+                F::round(x:F);
+                F::recip(x:F);
+                F::abs(x:F);
+                F::ln(x:F);
+                F::min(x:F, y:F);
+                F::max(x:F, y:F);
+                F::pow(x:F, n:F);
+                F::sqrt(x:F);
+                F::cbrt(x:F);
+                F::hypot(x:F, y:F);
+                F::sin(x:F);
+                F::cos(x:F);
+                F::bias(x:F,b:F);
+                F::fit(x:F, oldmin:F, oldmax:F, newmin:F, newmax:F);
+                F::fit01(x:F, newmin:F, newmax:F);
+                F::clamp(x:F, min:F, max:F);
+                F::clamp01(x:F);
+                $(F::$fname($($fargname : $fargty),*);)*
+                $(@F::$fname_($($fargname_ : $fargty_),*) => $fname2_($($fargname2_),*);)*
+                U::floor(x:U);
+                U::ceil(x:U);
+                U::round(x:U);
+                U::recip(x:U);
+                U::abs(x:U);
+                U::ln(x:U);
+                U::min(x:U, y:U);
+                U::max(x:U, y:U);
+                U::pow(x:U, n:U);
+                U::sqrt(x:U);
+                U::cbrt(x:U);
+                U::hypot(x:U, y:U);
+                U::sin(x:U);
+                U::cos(x:U);
+                U::bias(x:U,b:U);
+                U::fit(x:U, oldmin:U, oldmax:U, newmin:U, newmax:U);
+                U::fit01(x:U, newmin:U, newmax:U);
+                U::clamp(x:U, min:U, max:U);
+                U::clamp01(x:U);
+                $(U::$uname($($uargname : $uargty),*);)*
+                $(@U::$uname_($($uargname_ : $uargty_),*) => $uname2_($($uargname2_),*);)*
             }
         }
     };

@@ -37,10 +37,10 @@ use std::hash::Hash;
 //     fn func(&self) -> impl FnOnce() -> Self::Output;
 // }
 
-pub trait FFunc: Eq + PartialEq + Hash + Clone + Debug {
+pub trait FDispatcher: Eq + PartialEq + Hash + Clone + Debug {
     fn dispatch(_name: &str, _args: &[ICV]) -> Option<FOP<Self>>;
 }
-pub trait UFunc: Eq + PartialEq + Hash + Clone + Debug {
+pub trait UDispatcher: Eq + PartialEq + Hash + Clone + Debug {
     fn dispatch(_name: &str, _args: &[ICV]) -> Option<UOP<Self>>;
 }
 

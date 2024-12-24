@@ -43,13 +43,13 @@ use std::marker::PhantomData;
 type OP<M> = ops::OP<<M as Module>::FFN, <M as Module>::UFN>;
 
 impl Ast {
-    pub fn compile<M: Module>(&self, cexpr: &mut CExpr<M>, module: &M) -> Result<(), Error> {
+    pub fn compile<M: Module>(&self, cexpr: &mut Engine<M>, module: &M) -> Result<(), Error> {
         cexpr.compile(self, module)
     }
 }
 
-pub fn compile<M: Module>(ast: &Ast, cexpr: &mut CExpr<M>, module: &M) -> Result<(), Error> {
-    CExpr::compile(cexpr, ast, module)
+pub fn compile<M: Module>(ast: &Ast, cexpr: &mut Engine<M>, module: &M) -> Result<(), Error> {
+    Engine::compile(cexpr, ast, module)
 }
 
 /// You must `use` the `Compiler` trait before you can call `.compile()` on parsed `Expr`s.
@@ -57,15 +57,15 @@ pub trait Compiler<M: Module> {
     /// Turns a parsed `Expr` into a compiled `OP`.
     ///
     /// Cannot fail, unless you run out of memory.
-    fn compile(&self, ast: &Ast, cexpr: &mut CExpr<M>, module: &M) -> Result<OP<M>, Error>;
+    fn compile(&self, ast: &Ast, cexpr: &mut Engine<M>, module: &M) -> Result<OP<M>, Error>;
 }
 
-/// `CExpr` is where `compile()` results are stored.
-pub struct CExpr<M: Module> {
+/// `Engine` is where `compile()` results are stored.
+pub struct Engine<M: Module> {
     pub(crate) ops: Vec<OP<M>>,
 }
 
-impl<M: Module> CExpr<M> {
+impl<M: Module> Engine<M> {
     pub fn new() -> Self {
         Self { ops: Vec::new() }
     }
@@ -122,7 +122,7 @@ impl<M: Module> CExpr<M> {
     }
 
     /// Returns a reference to the [`OP`](../compiler/enum.OP.html)
-    /// located at `instr_i` within the `CExpr.ops'.
+    /// located at `instr_i` within the `Engine.ops'.
     ///
     /// If `instr_i` is out-of-bounds, a reference to a default `OP` is returned.
     ///
@@ -132,7 +132,7 @@ impl<M: Module> CExpr<M> {
         self.ops.get(instr_i).unwrap()
     }
 
-    /// Appends an `OP` to `CExpr.ops`.
+    /// Appends an `OP` to `Engine.ops`.
     #[inline]
     pub fn push(&mut self, instr: OP<M>) -> usize {
         let i = self.ops.len();
@@ -140,13 +140,13 @@ impl<M: Module> CExpr<M> {
         i
     }
 
-    /// Removes an `OP` from `CExpr.ops` as efficiently as possible.
+    /// Removes an `OP` from `Engine.ops` as efficiently as possible.
     #[inline]
     pub fn pop(&mut self) -> OP<M> {
         self.ops.pop().unwrap()
     }
 
-    /// Clears all data from `CExpr.ops`.
+    /// Clears all data from `Engine.ops`.
     #[inline]
     pub fn clear(&mut self) {
         self.ops.clear();
@@ -165,7 +165,7 @@ impl<M: Module> CExpr<M> {
 
 // impl OP<M> {
 //     #[inline]
-//     fn to_uicv<M>(self, expr: &mut CExpr<M>) -> F {
+//     fn to_uicv<M>(self, expr: &mut Engine<M>) -> F {
 //         match self {
 //             FOP(op) => F::F(op.to_icv(expr)),
 //             UOP(op) => U::U(op.to_icv(expr)),
@@ -175,7 +175,7 @@ impl<M: Module> CExpr<M> {
 
 impl<FFN, UFN> ops::OP<FFN, UFN> {
     #[inline]
-    fn to_icv<M: Module<FFN = FFN, UFN = UFN>>(self, expr: &mut CExpr<M>) -> ICV {
+    fn to_icv<M: Module<FFN = FFN, UFN = UFN>>(self, expr: &mut Engine<M>) -> ICV {
         match self {
             FOP(FOP::CONST(c)) => F(F::CONST(c)),
             FOP(FOP::VAR(v)) => F(F::VAR(v)),
@@ -188,7 +188,7 @@ impl<FFN, UFN> ops::OP<FFN, UFN> {
     }
 
     // #[inline]
-    // fn to_ficv<M: Module<FFN = FFN, UFN = UFN>>(self, expr: &mut CExpr<M>) -> F {
+    // fn to_ficv<M: Module<FFN = FFN, UFN = UFN>>(self, expr: &mut Engine<M>) -> F {
     //     match self {
     //         FOP(FOP::CONST(c)) => F::CONST(c),
     //         FOP(FOP::VAR(v)) => F::VAR(v),
@@ -201,7 +201,7 @@ impl<FFN, UFN> ops::OP<FFN, UFN> {
     // }
 
     // #[inline]
-    // fn to_uicv<M: Module<FFN = FFN, UFN = UFN>>(self, expr: &mut CExpr<M>) -> U {
+    // fn to_uicv<M: Module<FFN = FFN, UFN = UFN>>(self, expr: &mut Engine<M>) -> U {
     //     match self {
     //         UOP(UOP::CONST(c)) => U::CONST(c),
     //         UOP(UOP::VAR(v)) => U::VAR(v),
@@ -216,7 +216,7 @@ impl<FFN, UFN> ops::OP<FFN, UFN> {
 
 impl<FFN> FOP<FFN> {
     #[inline]
-    fn to_ficv<M: Module<FFN = FFN>>(self, expr: &mut CExpr<M>) -> F {
+    fn to_ficv<M: Module<FFN = FFN>>(self, expr: &mut Engine<M>) -> F {
         match self {
             FOP::CONST(c) => F::CONST(c),
             FOP::VAR(v) => F::VAR(v),
@@ -225,7 +225,7 @@ impl<FFN> FOP<FFN> {
     }
 
     // #[inline]
-    // fn to_uicv<M: Module<FFN = FFN>>(self, expr: &mut CExpr<M>) -> U {
+    // fn to_uicv<M: Module<FFN = FFN>>(self, expr: &mut Engine<M>) -> U {
     //     match self {
     //         FOP::CONST(c) => U::CONST([c; 2]),
     //         _ => U::I(expr.push(FOP(self))),
@@ -235,7 +235,7 @@ impl<FFN> FOP<FFN> {
 
 impl<UFN> UOP<UFN> {
     // #[inline]
-    // fn to_ficv<M: Module<UFN = UFN>>(self, expr: &mut CExpr<M>) -> F {
+    // fn to_ficv<M: Module<UFN = UFN>>(self, expr: &mut Engine<M>) -> F {
     //     match self {
     //         UOP::CONST(c) => F::CONST(c[0]),
     //         UOP::VAR(v) => F::VAR(v),
@@ -244,7 +244,7 @@ impl<UFN> UOP<UFN> {
     // }
 
     #[inline]
-    fn to_uicv<M: Module<UFN = UFN>>(self, expr: &mut CExpr<M>) -> U {
+    fn to_uicv<M: Module<UFN = UFN>>(self, expr: &mut Engine<M>) -> U {
         match self {
             UOP::CONST(c) => U::CONST(c),
             UOP::VAR(v) => U::VAR(v),
@@ -253,14 +253,14 @@ impl<UFN> UOP<UFN> {
     }
 }
 
-impl<M: Module> Debug for CExpr<M> {
+impl<M: Module> Debug for Engine<M> {
     fn fmt(&self, f: &mut fmt::Formatter) -> Result<(), fmt::Error> {
         debug_indexed_list(f, &self.ops)?;
         Ok(())
     }
 }
 
-impl<M: Module> CExpr<M> {
+impl<M: Module> Engine<M> {
     #[inline]
     fn neg_wrap(&mut self, op: OP<M>) -> OP<M> {
         match op {
@@ -531,7 +531,7 @@ impl<'s> ExprSlice<'s> {
 // x = cos(y)
 // vec3 v = sin(x)
 impl<M: Module> Compiler<M> for ExprSlice<'_> {
-    fn compile(&self, ast: &Ast, cexpr: &mut CExpr<M>, module: &M) -> Result<OP<M>, Error> {
+    fn compile(&self, ast: &Ast, cexpr: &mut Engine<M>, module: &M) -> Result<OP<M>, Error> {
         // Associative:  (2+3)+4 = 2+(3+4)
         // Commutative:  1+2 = 2+1
         //
@@ -817,14 +817,14 @@ impl<M: Module> Compiler<M> for ExprSlice<'_> {
 }
 
 impl<M: Module> Compiler<M> for Expr {
-    fn compile(&self, ast: &Ast, cexpr: &mut CExpr<M>, module: &M) -> Result<OP<M>, Error> {
+    fn compile(&self, ast: &Ast, cexpr: &mut Engine<M>, module: &M) -> Result<OP<M>, Error> {
         let top = ExprSlice::from_expr(&self);
         top.compile(ast, cexpr, module)
     }
 }
 
 impl<M: Module> Compiler<M> for UnaryOp {
-    fn compile(&self, ast: &Ast, cexpr: &mut CExpr<M>, module: &M) -> Result<OP<M>, Error> {
+    fn compile(&self, ast: &Ast, cexpr: &mut Engine<M>, module: &M) -> Result<OP<M>, Error> {
         match self {
             Neg(fcv) => {
                 let op = fcv.compile(ast, cexpr, module)?;
@@ -840,7 +840,7 @@ impl<M: Module> Compiler<M> for UnaryOp {
 }
 
 impl<M: Module> Compiler<M> for ECV {
-    fn compile(&self, ast: &Ast, cexpr: &mut CExpr<M>, module: &M) -> Result<OP<M>, Error> {
+    fn compile(&self, ast: &Ast, cexpr: &mut Engine<M>, module: &M) -> Result<OP<M>, Error> {
         match self {
             Const(c) => Ok(FOP(FOP::CONST(*c))),
             Var(name) => {
@@ -868,7 +868,7 @@ impl<M: Module> Compiler<M> for ECV {
 }
 
 impl<M: Module> Compiler<M> for Value {
-    fn compile(&self, ast: &Ast, cexpr: &mut CExpr<M>, module: &M) -> Result<OP<M>, Error> {
+    fn compile(&self, ast: &Ast, cexpr: &mut Engine<M>, module: &M) -> Result<OP<M>, Error> {
         match self {
             ECV(ecv) => ecv.compile(ast, cexpr, module),
             UnaryOp(u) => u.compile(ast, cexpr, module),

@@ -26,7 +26,9 @@ pub trait Float: Pod + PartialEq {
     fn sub(self, other: Self) -> Self;
     fn mul(self, other: Self) -> Self;
     fn div(self, other: Self) -> Self;
+    fn rem(self, other: Self) -> Self;
     fn neg(self) -> Self;
+    fn select(self, then: Self, else_: Self) -> Self;
 
     // fn eq(self, other: Self) -> Self;
     // fn ne(self, other: Self) -> Self;
@@ -35,7 +37,6 @@ pub trait Float: Pod + PartialEq {
     // fn gt(self, other: Self) -> Self;
     // fn gte(self, other: Self) -> Self;
 
-    fn rem(self, other: Self) -> Self;
     fn floor(self) -> Self;
     fn ceil(self) -> Self;
     fn round(self) -> Self;
@@ -50,8 +51,6 @@ pub trait Float: Pod + PartialEq {
     fn hypot(self, other: Self) -> Self;
     fn sin(self) -> Self;
     fn cos(self) -> Self;
-
-    fn select(self, then: Self, else_: Self) -> Self;
 
     #[inline(always)]
     fn bias(self, b: Self) -> Self {
@@ -75,7 +74,6 @@ pub trait Float: Pod + PartialEq {
     fn clamp(self, min: Self, max: Self) -> Self {
         self.max(min).min(max)
     }
-
     #[inline(always)]
     fn clamp01(self) -> Self {
         self.max(Self::ZERO).min(Self::ONE)
@@ -108,6 +106,10 @@ macro_rules! impl_float {
                 self / other
             }
             #[inline(always)]
+            fn rem(self, other: Self) -> Self {
+                ((self % other) + other) % other
+            }
+            #[inline(always)]
             fn neg(self) -> Self {
                 -self
             }
@@ -131,10 +133,6 @@ macro_rules! impl_float {
                 }
             }
 
-            #[inline(always)]
-            fn rem(self, other: Self) -> Self {
-                ((self % other) + other) % other
-            }
             #[inline(always)]
             fn floor(self) -> Self {
                 self.floor()
@@ -327,8 +325,35 @@ impl Float for f32x8 {
     }
 }
 
-macro_rules! impl_float_array {
-    ( $N:literal, $($i:literal),+) => {
+macro_rules! map {
+    (1, $f:expr, $($a:expr),+) => {
+        $f($($a),+)
+    };
+    (2, $f:expr, $($a:expr),+) => {
+        [
+            $f($($a[0]),+),
+            $f($($a[1]),+),
+        ]
+    };
+    (3, $f:expr, $($a:expr),+) => {
+        [
+            $f($($a[0]),+),
+            $f($($a[1]),+),
+            $f($($a[2]),+),
+        ]
+    };
+    (4, $f:expr, $($a:expr),+) => {
+        [
+            $f($($a[0]),+),
+            $f($($a[1]),+),
+            $f($($a[2]),+),
+            $f($($a[3]),+),
+        ]
+    };
+}
+
+macro_rules! impl_for_float_array {
+    ( $N:tt, $($f:ident(self $(, $a:ident)*),)*) => {
         impl<T: Float> Float for [T; $N] {
             const ZERO: Self = [T::ZERO; $N];
             const ONE: Self = [T::ONE; $N];
@@ -337,100 +362,56 @@ macro_rules! impl_float_array {
             const PI: Self = [T::PI; $N];
 
             #[inline(always)]
-            fn select(self, then:Self, else_:Self) -> Self {
-                [$(self[$i].select(then[$i], else_[$i])),+]
-            }
-            #[inline(always)]
-            fn add(self, other: Self) -> Self {
-                [$(self[$i].add(other[$i])),+]
-            }
-            #[inline(always)]
-            fn sub(self, other: Self) -> Self {
-                [$(self[$i].sub(other[$i])),+]
-            }
-            #[inline(always)]
-            fn mul(self, other: Self) -> Self {
-                [$(self[$i].mul(other[$i])),+]
-            }
-            #[inline(always)]
-            fn div(self, other: Self) -> Self {
-                [$(self[$i].div(other[$i])),+]
-            }
-            #[inline(always)]
-            fn neg(self) -> Self {
-                [$(self[$i].neg()),+]
-            }
-            #[inline(always)]
             fn from_f64(f:f64) -> Self {
                 [T::from_f64(f); $N]
             }
-            #[inline(always)]
-            fn rem(self, other:Self) -> Self {
-                [$(self[$i].rem(other[$i])),+]
-            }
-            #[inline(always)]
-            fn floor(self) -> Self {
-                [$(self[$i].floor()),+]
-            }
-            #[inline(always)]
-            fn ceil(self) -> Self {
-                [$(self[$i].ceil()),+]
-            }
-            #[inline(always)]
-            fn recip(self) -> Self {
-                [$(self[$i].recip()),+]
-            }
-            #[inline(always)]
-            fn abs(self) -> Self {
-                [$(self[$i].abs()),+]
-            }
-            #[inline(always)]
-            fn ln(self) -> Self {
-                [$(self[$i].ln()),+]
-            }
-            #[inline(always)]
-            fn min(self, other: Self) -> Self {
-                [$(self[$i].min(other[$i])),+]
-            }
-            #[inline(always)]
-            fn max(self, other: Self) -> Self {
-                [$(self[$i].max(other[$i])),+]
-            }
-            #[inline(always)]
-            fn pow(self, n: Self) -> Self {
-                [$(self[$i].pow(n[$i])),+]
-            }
-            #[inline(always)]
-            fn sqrt(self) -> Self {
-                [$(self[$i].sqrt()),+]
-            }
-            #[inline(always)]
-            fn cbrt(self) -> Self {
-                [$(self[$i].cbrt()),+]
-            }
-            #[inline(always)]
-            fn hypot(self, other: Self) -> Self {
-                [$(self[$i].hypot(other[$i])),+]
-            }
-            #[inline(always)]
-            fn round(self) -> Self {
-                [$(self[$i].round()),+]
-            }
-            #[inline(always)]
-            fn sin(self) -> Self {
-                [$(self[$i].sin()),+]
-            }
-            #[inline(always)]
-            fn cos(self) -> Self {
-                [$(self[$i].cos()),+]
-            }
+
+            $(
+                #[inline(always)]
+                fn $f(self $(, $a:Self)*) -> Self {
+                    map!($N, T::$f, self $(, $a)*)
+                }
+            )*
+
         }
     };
 }
 
-impl_float_array!(2, 0, 1);
-impl_float_array!(3, 0, 1, 2);
-impl_float_array!(4, 0, 1, 2, 3);
+macro_rules! impl_for_float_array_n {
+    ($N:tt) => {
+        impl_for_float_array!(
+            $N,
+            add(self, other),
+            sub(self, other),
+            mul(self, other),
+            div(self, other),
+            rem(self, other),
+            neg(self),
+            select(self, then, else_),
+            floor(self),
+            ceil(self),
+            round(self),
+            recip(self),
+            abs(self),
+            ln(self),
+            min(self, other),
+            max(self, other),
+            pow(self, n),
+            sqrt(self),
+            cbrt(self),
+            hypot(self, other),
+            sin(self),
+            cos(self),
+            bias(self, b),
+            fit(self, oldmin, oldmax, newmin, newmax),
+            clamp(self, min, max),
+        );
+    };
+}
+
+impl_for_float_array_n!(2);
+impl_for_float_array_n!(3);
+impl_for_float_array_n!(4);
 
 #[cfg(test)]
 mod tests {

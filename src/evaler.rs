@@ -14,7 +14,7 @@ pub enum Value<T> {
     // V([T; 3]),
 }
 
-impl<M> CExpr<M>
+impl<M> Engine<M>
 where
     M: Module,
 {
@@ -67,7 +67,7 @@ where
     T: Float,
     CTX: Context<T>,
 {
-    fn eval(&self, cexpr: &CExpr<M>, ctx: &CTX) -> T;
+    fn eval(&self, cexpr: &Engine<M>, ctx: &CTX) -> T;
 }
 
 pub trait UEvaler<M, T, CTX>
@@ -76,7 +76,7 @@ where
     T: Float,
     CTX: Context<T>,
 {
-    fn eval(&self, cexpr: &CExpr<M>, ctx: &CTX) -> [T; 2];
+    fn eval(&self, cexpr: &Engine<M>, ctx: &CTX) -> [T; 2];
 }
 
 impl<M, T, CTX> FEvaler<M, T, CTX> for ()
@@ -85,7 +85,7 @@ where
     T: Float,
     CTX: Context<T>,
 {
-    fn eval(&self, cexpr: &CExpr<M>, ctx: &CTX) -> T {
+    fn eval(&self, cexpr: &Engine<M>, ctx: &CTX) -> T {
         T::ZERO
     }
 }
@@ -96,7 +96,7 @@ where
     T: Float,
     CTX: Context<T>,
 {
-    fn eval(&self, cexpr: &CExpr<M>, ctx: &CTX) -> [T; 2] {
+    fn eval(&self, cexpr: &Engine<M>, ctx: &CTX) -> [T; 2] {
         [T::ZERO; 2]
     }
 }
@@ -110,7 +110,7 @@ where
     M::UFN: UEvaler<M, T, CTX>,
 {
     #[inline]
-    fn eval(&self, cexpr: &CExpr<M>, ctx: &CTX) -> T {
+    fn eval(&self, cexpr: &Engine<M>, ctx: &CTX) -> T {
         match self {
             Self::CONST(c) => T::from_f64(*c),
             Self::VAR(offset) => ctx.get_fvar(*offset),
@@ -132,7 +132,7 @@ where
     M::UFN: UEvaler<M, T, CTX>,
 {
     #[inline]
-    fn eval(&self, cexpr: &CExpr<M>, ctx: &CTX) -> [T; 2] {
+    fn eval(&self, cexpr: &Engine<M>, ctx: &CTX) -> [T; 2] {
         match self {
             Self::CONST([x, y]) => [T::from_f64(*x), T::from_f64(*y)],
             Self::VAR(offset) => ctx.get_uvar(*offset),
@@ -155,7 +155,7 @@ where
     M::UFN: UEvaler<M, T, CTX>,
 {
     #[inline]
-    fn eval(&self, cexpr: &CExpr<M>, ctx: &CTX) -> T {
+    fn eval(&self, cexpr: &Engine<M>, ctx: &CTX) -> T {
         let zero = T::ZERO;
         match self {
             Self::MUL(licv, ricv) => T::mul(licv.eval(cexpr, ctx), ricv.eval(cexpr, ctx)),
@@ -206,7 +206,7 @@ where
     M::UFN: UEvaler<M, T, CTX>,
 {
     #[inline]
-    fn eval(&self, cexpr: &CExpr<M>, ctx: &CTX) -> [T; 2] {
+    fn eval(&self, cexpr: &Engine<M>, ctx: &CTX) -> [T; 2] {
         let zero = T::ZERO;
         match self {
             Self::SET(icv0, icv1) => [icv0.eval(cexpr, ctx), icv1.eval(cexpr, ctx)],
@@ -259,7 +259,7 @@ mod test {
         //     }
         // }
 
-        let mmm = MyModule::new(IndexMap::from([
+        let mmm = MyModule::with_vars(IndexMap::from([
             ("id".into(), F(F::VAR(0))),
             ("b".into(), F(F::VAR(1))),
             ("uv".into(), U(U::VAR(2))),
@@ -295,9 +295,9 @@ mod test {
         println!("size of U: {}", std::mem::size_of::<U>());
         let mut ast = Ast::new();
 
-        let mut cexpr = CExpr::new();
+        let mut cexpr = Engine::new();
 
-        let expr_str = "a=3+uv+id+[1,2] + dot([1,2],1)+uv+b;a";
+        let expr_str = "a=sin(id)+uv+id+[1,2] + dot([1,2],1)+uv+b;a";
         eprintln!("Test expr: '{}'\n", expr_str);
 
         println!("PARSE: {:?}", ast.parse(expr_str));
@@ -386,6 +386,7 @@ module! {
         U::zzz(x:U);
     }
 }
+
 trait ZZZ {
     fn zzz(self) -> Self;
 }
