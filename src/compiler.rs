@@ -173,6 +173,29 @@ impl<M: Module> Engine<M> {
 //     }
 // }
 
+impl ICV {
+    #[inline]
+    fn to_ficv<M: Module>(self, expr: &mut Engine<M>) -> F {
+        match self {
+            F(f) => f,
+            U(U::CONST(c)) => F::CONST(c[0]),
+            U(U::I(i)) => F::I(i),
+            U(U::VAR(u)) => F::I(expr.push(UOP(UOP::VAR(u)))),
+            _ => unreachable!(),
+        }
+    }
+
+    fn to_uicv<M: Module>(self, expr: &mut Engine<M>) -> U {
+        match self {
+            U(u) => u,
+            F(F::CONST(c)) => U::CONST([c; 2]),
+            F(F::I(i)) => U::I(i),
+            F(F::VAR(u)) => U::I(expr.push(FOP(FOP::VAR(u)))),
+            _ => unreachable!(),
+        }
+    }
+}
+
 impl<FFN, UFN> ops::OP<FFN, UFN> {
     #[inline]
     fn to_icv<M: Module<FFN = FFN, UFN = UFN>>(self, expr: &mut Engine<M>) -> ICV {
@@ -187,31 +210,21 @@ impl<FFN, UFN> ops::OP<FFN, UFN> {
         }
     }
 
-    // #[inline]
-    // fn to_ficv<M: Module<FFN = FFN, UFN = UFN>>(self, expr: &mut Engine<M>) -> F {
-    //     match self {
-    //         FOP(FOP::CONST(c)) => F::CONST(c),
-    //         FOP(FOP::VAR(v)) => F::VAR(v),
-    //         FOP(_) => F::I(expr.push(self)),
+    #[inline]
+    fn to_ficv<M: Module<FFN = FFN, UFN = UFN>>(self, expr: &mut Engine<M>) -> F {
+        match self {
+            FOP(fop) => fop.to_ficv(expr),
+            UOP(uop) => uop.to_ficv(expr),
+        }
+    }
 
-    //         UOP(UOP::CONST(c)) => F::CONST(c[0]),
-    //         UOP(UOP::VAR(v)) => F::VAR(v),
-    //         UOP(_) => F::I(expr.push(self)),
-    //     }
-    // }
-
-    // #[inline]
-    // fn to_uicv<M: Module<FFN = FFN, UFN = UFN>>(self, expr: &mut Engine<M>) -> U {
-    //     match self {
-    //         UOP(UOP::CONST(c)) => U::CONST(c),
-    //         UOP(UOP::VAR(v)) => U::VAR(v),
-    //         UOP(_) => U::I(expr.push(self)),
-
-    //         FOP(FOP::CONST(c)) => U::CONST([c; 2]),
-    //         // FOP(FOP::VAR(c)) => U::FROM(F::VAR(c)),
-    //         FOP(_) => U::I(expr.push(self)),
-    //     }
-    // }
+    #[inline]
+    fn to_uicv<M: Module<FFN = FFN, UFN = UFN>>(self, expr: &mut Engine<M>) -> U {
+        match self {
+            UOP(uop) => uop.to_uicv(expr),
+            FOP(fop) => fop.to_uicv(expr),
+        }
+    }
 }
 
 impl<FFN> FOP<FFN> {
@@ -224,24 +237,23 @@ impl<FFN> FOP<FFN> {
         }
     }
 
-    // #[inline]
-    // fn to_uicv<M: Module<FFN = FFN>>(self, expr: &mut Engine<M>) -> U {
-    //     match self {
-    //         FOP::CONST(c) => U::CONST([c; 2]),
-    //         _ => U::I(expr.push(FOP(self))),
-    //     }
-    // }
+    #[inline]
+    fn to_uicv<M: Module<FFN = FFN>>(self, expr: &mut Engine<M>) -> U {
+        match self {
+            FOP::CONST(c) => U::CONST([c; 2]),
+            _ => U::I(expr.push(FOP(self))),
+        }
+    }
 }
 
 impl<UFN> UOP<UFN> {
-    // #[inline]
-    // fn to_ficv<M: Module<UFN = UFN>>(self, expr: &mut Engine<M>) -> F {
-    //     match self {
-    //         UOP::CONST(c) => F::CONST(c[0]),
-    //         UOP::VAR(v) => F::VAR(v),
-    //         _ => F::I(expr.push(UOP(self))),
-    //     }
-    // }
+    #[inline]
+    fn to_ficv<M: Module<UFN = UFN>>(self, expr: &mut Engine<M>) -> F {
+        match self {
+            UOP::CONST(c) => F::CONST(c[0]),
+            _ => F::I(expr.push(UOP(self))),
+        }
+    }
 
     #[inline]
     fn to_uicv<M: Module<UFN = UFN>>(self, expr: &mut Engine<M>) -> U {
@@ -272,16 +284,16 @@ impl<M: Module> Engine<M> {
         }
     }
 
-    #[inline]
-    fn not_wrap(&mut self, op: OP<M>) -> OP<M> {
-        match op {
-            FOP(FOP::NOT(_)) | UOP(UOP::NOT(_)) => self.pop(),
-            FOP(FOP::CONST(c)) => FOP(FOP::CONST((c == 0.0).into())),
-            FOP(op) => FOP(FOP::NOT(op.to_ficv(self))),
-            UOP(UOP::CONST([x, y])) => UOP(UOP::CONST([(x == 0.0).into(), (y == 0.0).into()])),
-            UOP(op) => UOP(UOP::NOT(op.to_uicv(self))),
-        }
-    }
+    // #[inline]
+    // fn not_wrap(&mut self, op: OP<M>) -> OP<M> {
+    //     match op {
+    //         FOP(FOP::NOT(_)) | UOP(UOP::NOT(_)) => self.pop(),
+    //         FOP(FOP::CONST(c)) => FOP(FOP::CONST((c == 0.0).into())),
+    //         FOP(op) => FOP(FOP::NOT(op.to_ficv(self))),
+    //         UOP(UOP::CONST([x, y])) => UOP(UOP::CONST([(x == 0.0).into(), (y == 0.0).into()])),
+    //         UOP(op) => UOP(UOP::NOT(op.to_uicv(self))),
+    //     }
+    // }
 
     #[inline]
     fn inv_wrap(&mut self, op: OP<M>) -> OP<M> {
@@ -318,7 +330,7 @@ impl<M: Module> Engine<M> {
                     out = FOP(FOP::MUL(fop0.to_ficv(self), fop1.to_ficv(self)));
                 }
                 (FOP(fop0), UOP(uop1)) => {
-                    out = UOP(UOP::MUL(fop0.to_ficv(self).into(), uop1.to_uicv(self)));
+                    out = UOP(UOP::MUL(fop0.to_uicv(self), uop1.to_uicv(self)));
                 }
                 (UOP(uop0), UOP(uop1)) => {
                     out = UOP(UOP::MUL(uop0.to_uicv(self), uop1.to_uicv(self)));
@@ -329,11 +341,10 @@ impl<M: Module> Engine<M> {
         match (const_out, out) {
             (FOP(FOP::CONST(1.0)) | UOP(UOP::CONST([1.0, 1.0])), op1 @ _) => op1,
             (FOP(fop0), FOP(fop1)) => FOP(FOP::MUL(fop0.to_ficv(self), fop1.to_ficv(self))),
-            (op0 @ (FOP(_) | UOP(_)), op1 @ (FOP(_) | UOP(_))) => UOP(UOP::MUL(
-                op0.to_icv(self).try_into().unwrap(),
-                op1.to_icv(self).try_into().unwrap(),
-            )), // (UOP(fop0), FOP(uop1)) => UOP(UOP::MUL(fop0.to_uicv(self), uop1.to_uicv(self))),
-                // (UOP(uop0), UOP(uop1)) => UOP(UOP::MUL(uop0.to_uicv(self), uop1.to_uicv(self))),
+            (op0 @ (FOP(_) | UOP(_)), op1 @ (FOP(_) | UOP(_))) => {
+                UOP(UOP::MUL(op0.to_uicv(self), op1.to_uicv(self)))
+            } // (UOP(fop0), FOP(uop1)) => UOP(UOP::MUL(fop0.to_uicv(self), uop1.to_uicv(self))),
+              // (UOP(uop0), UOP(uop1)) => UOP(UOP::MUL(uop0.to_uicv(self), uop1.to_uicv(self))),
         }
     }
 
@@ -362,7 +373,7 @@ impl<M: Module> Engine<M> {
                     out = FOP(FOP::ADD(fop0.to_ficv(self), fop1.to_ficv(self)));
                 }
                 (FOP(fop0), UOP(uop1)) => {
-                    out = UOP(UOP::ADD(fop0.to_ficv(self).into(), uop1.to_uicv(self)));
+                    out = UOP(UOP::ADD(fop0.to_uicv(self), uop1.to_uicv(self)));
                 }
                 (UOP(uop0), UOP(uop1)) => {
                     out = UOP(UOP::ADD(uop0.to_uicv(self), uop1.to_uicv(self)));
@@ -373,12 +384,11 @@ impl<M: Module> Engine<M> {
         match (const_out, out) {
             (FOP(FOP::CONST(0.0)) | UOP(UOP::CONST([0.0, 0.0])), op1 @ _) => op1,
             (FOP(fop0), FOP(fop1)) => FOP(FOP::ADD(fop0.to_ficv(self), fop1.to_ficv(self))),
-            (op0 @ (FOP(_) | UOP(_)), op1 @ (FOP(_) | UOP(_))) => UOP(UOP::ADD(
-                op0.to_icv(self).try_into().unwrap(),
-                op1.to_icv(self).try_into().unwrap(),
-            )), // (FOP(fop0), UOP(uop1)) => UOP(UOP::ADD(fop0.to_uicv(self), uop1.to_uicv(self))),
-                // (UOP(fop0), FOP(uop1)) => UOP(UOP::ADD(fop0.to_uicv(self), uop1.to_uicv(self))),
-                // (UOP(uop0), UOP(uop1)) => UOP(UOP::ADD(uop0.to_uicv(self), uop1.to_uicv(self))),
+            (op0 @ (FOP(_) | UOP(_)), op1 @ (FOP(_) | UOP(_))) => {
+                UOP(UOP::ADD(op0.to_uicv(self), op1.to_uicv(self)))
+            } // (FOP(fop0), UOP(uop1)) => UOP(UOP::ADD(fop0.to_uicv(self), uop1.to_uicv(self))),
+              // (UOP(fop0), FOP(uop1)) => UOP(UOP::ADD(fop0.to_uicv(self), uop1.to_uicv(self))),
+              // (UOP(uop0), UOP(uop1)) => UOP(UOP::ADD(uop0.to_uicv(self), uop1.to_uicv(self))),
         }
     }
 
@@ -424,7 +434,7 @@ impl<M: Module> Engine<M> {
                     }
                 }
             }
-            U::F(ficv) => self.push_fadd_leaf(ops, ficv),
+
             U::CONST(c) => ops.push(UOP(UOP::CONST(c))),
             U::VAR(v) => ops.push(UOP(UOP::VAR(v))),
         };
@@ -473,7 +483,7 @@ impl<M: Module> Engine<M> {
                     }
                 }
             }
-            U::F(ficv) => self.push_fmul_leaf(ops, ficv),
+
             U::CONST(c) => ops.push(UOP(UOP::CONST(c))),
             U::VAR(v) => ops.push(UOP(UOP::VAR(v))),
         };
@@ -756,9 +766,9 @@ impl<M: Module> Compiler<M> for ExprSlice<'_> {
                                 FOP(FOP::CONST(f64::rem(dividend, divisor)))
                             }
                             (F(lficv), F(rficv)) => FOP(FOP::REM(lficv, rficv)),
-                            (licv @ (F(_) | U(_)), ricv @ (U(_) | F(_))) => {
-                                let luicv = licv.try_into().unwrap();
-                                let ruicv = ricv.try_into().unwrap();
+                            (licv @ (F(_) | U(_)), ricv @ (F(_) | U(_))) => {
+                                let luicv = licv.to_uicv(cexpr);
+                                let ruicv = ricv.to_uicv(cexpr);
                                 UOP(match (luicv, ruicv) {
                                     (U::CONST(dividend), U::CONST(divisor)) => {
                                         UOP::CONST(<[f64; 2]>::rem(dividend, divisor))
@@ -792,8 +802,8 @@ impl<M: Module> Compiler<M> for ExprSlice<'_> {
                                 out = FOP(FOP::EXP(base.to_ficv(cexpr), power.to_ficv(cexpr)));
                             }
                             (power @ (FOP(_) | UOP(_)), base @ (UOP(_) | FOP(_))) => {
-                                let base = base.to_icv(cexpr).try_into().unwrap();
-                                let power = power.to_icv(cexpr).try_into().unwrap();
+                                let base = base.to_uicv(cexpr);
+                                let power = power.to_uicv(cexpr);
 
                                 out = UOP(match (base, power) {
                                     (U::CONST(base), U::CONST(power)) => {
@@ -832,8 +842,9 @@ impl<M: Module> Compiler<M> for UnaryOp {
             }
 
             Not(fcv) => {
-                let op = fcv.compile(ast, cexpr, module)?;
-                Ok(cexpr.not_wrap(op))
+                // let op = fcv.compile(ast, cexpr, module)?;
+                // Ok(cexpr.not_wrap(op))
+                unimplemented!()
             }
         }
     }
@@ -929,9 +940,9 @@ impl<M: Module> Compiler<M> for Value {
             List(vals) => match &vals.as_slice() {
                 &[ECV::Const(cx), ECV::Const(cy)] => Ok(UOP(UOP::CONST([*cx, *cy]))),
                 &[x, y] => {
-                    let x: FOP<M::FFN> = x.compile(ast, cexpr, module)?.try_into()?;
-                    let y: FOP<M::FFN> = y.compile(ast, cexpr, module)?.try_into()?;
-                    Ok(UOP(UOP::SET(x.to_ficv(cexpr), y.to_ficv(cexpr))))
+                    let x: F = x.compile(ast, cexpr, module)?.to_ficv(cexpr);
+                    let y: F = y.compile(ast, cexpr, module)?.to_ficv(cexpr);
+                    Ok(UOP(UOP::SET(x, y)))
                 }
                 _ => Err(Error::InvalidSyntax(
                     "The vector must be 2 to 3 elements long".into(),

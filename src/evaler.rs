@@ -116,7 +116,7 @@ where
             Self::VAR(offset) => ctx.get_fvar(*offset),
             Self::I(i) => match cexpr.get(*i) {
                 FOP(fop) => fop.eval(cexpr, ctx),
-                // UOP(uop) => uop.eval(cexpr, ctx)[0],
+                UOP(uop) => uop.eval(cexpr, ctx)[0],
                 _ => unreachable!(),
             },
         }
@@ -138,10 +138,9 @@ where
             Self::VAR(offset) => ctx.get_uvar(*offset),
             Self::I(i) => match cexpr.get(*i) {
                 UOP(uop) => uop.eval(cexpr, ctx),
-                // FOP(fop) => [fop.eval(cexpr, ctx); 2],
+                FOP(fop) => [fop.eval(cexpr, ctx); 2],
                 _ => unreachable!(),
             },
-            Self::F(ficv) => [ficv.eval(cexpr, ctx); 2],
         }
     }
 }
