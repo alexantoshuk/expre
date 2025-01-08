@@ -83,8 +83,8 @@ pub enum BinaryOp {
     And = 2,
     NE = 3,
     EQ = 4,
-    GTE = 5,
-    LTE = 6,
+    GE = 5,
+    LE = 6,
     GT = 7,
     LT = 8,
     Add = 9,
@@ -92,7 +92,7 @@ pub enum BinaryOp {
     Mul = 11,
     Div = 12,
     Rem = 13,
-    Exp = 14, // Highest Priority
+    Pow = 14, // Highest Priority
 }
 pub(crate) use crate::tokens::BinaryOp::*;
 
@@ -103,8 +103,8 @@ impl Display for BinaryOp {
             And => write!(f, "&&"),
             NE => write!(f, "!="),
             EQ => write!(f, "=="),
-            GTE => write!(f, ">="),
-            LTE => write!(f, "<="),
+            GE => write!(f, ">="),
+            LE => write!(f, "<="),
             GT => write!(f, ">"),
             LT => write!(f, "<"),
             Add => write!(f, "+"),
@@ -112,7 +112,7 @@ impl Display for BinaryOp {
             Mul => write!(f, "*"),
             Div => write!(f, "/"),
             Rem => write!(f, "%"),
-            Exp => write!(f, "^"),
+            Pow => write!(f, "^"),
         }
     }
 }

@@ -31,6 +31,7 @@ dyn-fmt = "^0.4"
 gxhash = "3.4.1"
 indexmap = "2.5.0"
 num-traits = "^0.2"
+once_map = "0.4.21"
 paste = "1.0.15"
 unhygienic2 = "0.1.0"
 wide = "0.7.30"
@@ -40,9 +41,9 @@ wide = "0.7.30"
 criterion = { version = "^0.5", features = ["html_reports"] }
 
 
-[[bench]]
-name = "bench"
-harness = false
+# [[bench]]
+# name = "bench"
+# harness = false
 
 
 [features]

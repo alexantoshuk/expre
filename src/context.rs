@@ -1,6 +1,7 @@
 use crate::evaler::{FEvaler, UEvaler};
 use crate::float::Float;
 use crate::ops::*;
+use bytemuck::*;
 use std::fmt::Debug;
 use std::hash::Hash;
 
@@ -13,7 +14,7 @@ use std::hash::Hash;
 //         None
 //     }
 
-//     fn func(_name: &str, _sarg: Option<&str>, _args: &[ICV]) -> Option<OP<Self>> {
+//     fn func(_name: &str, _sarg: Option<&str>, _args: &[ARG]) -> Option<OP<Self>> {
 //         None
 //     }
 
@@ -33,28 +34,44 @@ use std::hash::Hash;
 // pub trait FN: Sized + Clone + Debug {
 //     type Output: Float;
 
-//     fn dispatch(_name: &str, _sargs: Option<&str>, _args: &[ICV]) -> Option<Self>;
+//     fn dispatch(_name: &str, _sargs: Option<&str>, _args: &[ARG]) -> Option<Self>;
 //     fn func(&self) -> impl FnOnce() -> Self::Output;
 // }
 
-pub trait FDispatcher: Eq + PartialEq + Hash + Clone + Debug {
-    fn dispatch(_name: &str, _args: &[ICV]) -> Option<FOP<Self>>;
-}
-pub trait UDispatcher: Eq + PartialEq + Hash + Clone + Debug {
-    fn dispatch(_name: &str, _args: &[ICV]) -> Option<UOP<Self>>;
-}
+// pub trait FDispatcher: Eq + PartialEq + Hash + Clone + Debug {
+//     fn dispatch(_name: &str, _args: &[ARG]) -> Option<FOP<Self>>;
+// }
+// pub trait UDispatcher: Eq + PartialEq + Hash + Clone + Debug {
+//     fn dispatch(_name: &str, _args: &[ARG]) -> Option<UOP<Self>>;
+// }
 
-pub trait Module: Sized + Clone + Debug {
+pub trait Module: Sized + Clone {
     type FFN: Eq + PartialEq + Hash + Clone + Debug;
     type UFN: Eq + PartialEq + Hash + Clone + Debug;
 
-    fn dispatch_var(&self, _name: &str) -> Option<&ICV> {
+    fn dispatch_var(&self, _name: &str) -> Option<&ARG> {
         None
     }
 
-    fn dispatch_func(&self, _name: &str, _args: &[ICV]) -> Option<OP<Self::FFN, Self::UFN>> {
+    fn dispatch_func(&self, _name: &str, _args: &[ARG]) -> Option<OP<Self::FFN, Self::UFN>> {
         None
     }
+}
+
+impl Module for () {
+    type FFN = ();
+    type UFN = ();
+}
+
+#[inline]
+pub fn get<T: Float>(data: &[T], offset: usize) -> &T {
+    &data[offset]
+}
+
+#[inline]
+pub fn get_n<T: Float, const N: usize>(data: &[T], offset: usize) -> &[T; N] {
+    let slice = &data[offset..offset + N];
+    unsafe { &*(slice.as_ptr() as *const [T; N]) }
 }
 
 pub trait Context<T: Float>: Sized + Clone + Debug {
@@ -109,7 +126,7 @@ pub trait Context<T: Float>: Sized + Clone + Debug {
 
 //     /// Get the function associated with the given `name` and args
 //     #[inline]
-//     fn func(name: &str, sarg: Option<&str>, args: &[ICV]) -> Option<OP<Self>> {
+//     fn func(name: &str, sarg: Option<&str>, args: &[ARG]) -> Option<OP<Self>> {
 //         match (name, sarg, args) {
 //             ("sin", None, &[F(icv)]) => Some(FOP(FOP::FN(Self::FFN::SIN(icv)))),
 //             ("sin", None, &[U(icv)]) => Some(UOP(UOP::FN(Self::UFN::SIN(icv)))),
@@ -137,7 +154,7 @@ pub trait Context<T: Float>: Sized + Clone + Debug {
 
 //     /// Get the function associated with the given `name` and args
 //     #[inline]
-//     fn func(name: &str, sarg: &Option<String>, args: &[ICV]) -> Option<OP<Self>> {
+//     fn func(name: &str, sarg: &Option<String>, args: &[ARG]) -> Option<OP<Self>> {
 //         Std::func(name, sarg, args)
 //     }
 // }

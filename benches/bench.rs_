@@ -6,7 +6,7 @@ use std::collections::{BTreeMap, HashMap};
 
 fn criterion_benchmark(c: &mut Criterion) {
     let mut ast = expre::Ast::new();
-    let mut cexpr: CExpr<Builtins> = expre::CExpr::new();
+    let mut en: CExpr<Builtins> = expre::CExpr::new();
     // let mut map = BTreeMap::new();
     // map.insert("xxxxxxxx".to_string(), 10.0);
     // map.insert("yyyyyyyyyyyyy".to_string(), 5.0);
@@ -35,17 +35,17 @@ fn criterion_benchmark(c: &mut Criterion) {
 
     c.bench_function("parse", |b| b.iter(|| expre::parse(expr_str, &mut ast)));
 
-    cexpr.add_var("xxxxxxxx".to_owned(), &ctx[0]);
-    cexpr.add_var("yyyyyyyyyyyyy".to_owned(), &ctx[1]);
-    cexpr.add_var("zzzzzzzzzzz".to_owned(), &ctx[2]);
-    cexpr.add_var("wwwwwwwwwwww".to_owned(), &ctx[3]);
+    en.add_var("xxxxxxxx".to_owned(), &ctx[0]);
+    en.add_var("yyyyyyyyyyyyy".to_owned(), &ctx[1]);
+    en.add_var("zzzzzzzzzzz".to_owned(), &ctx[2]);
+    en.add_var("wwwwwwwwwwww".to_owned(), &ctx[3]);
 
-    c.bench_function("compile", |b| b.iter(|| ast.compile(&mut cexpr)));
+    c.bench_function("compile", |b| b.iter(|| ast.compile(&mut en)));
 
-    c.bench_function("eval", |b| b.iter(|| cexpr.eval()));
+    c.bench_function("eval", |b| b.iter(|| en.eval()));
 
     // c.bench_function("parse -> compile -> eval", |b| {
-    //     b.iter(|| expre::eval2(expr_str, &mut ast, &mut cexpr, &ctx))
+    //     b.iter(|| expre::eval2(expr_str, &mut ast, &mut en, &ctx))
     // });
 }
 

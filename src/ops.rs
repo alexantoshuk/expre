@@ -1,5 +1,8 @@
+use crate::compiler::*;
+use crate::context::*;
 use crate::error::Error;
-
+use crate::evaler::*;
+use crate::float::*;
 // use bytemuck::bytes_of;
 use gxhash::GxHasher;
 use num_traits::Zero;
@@ -25,39 +28,46 @@ impl From<f64> for U {
 }
 
 #[derive(Debug, Clone)]
-pub enum ICV {
+pub enum ARG {
     F(F),
     U(U),
-    S(String),
+    // S(String),
 }
 
-pub(crate) use crate::ops::ICV::*;
+pub(crate) use crate::ops::ARG::*;
 
-impl From<F> for ICV {
+// impl From<B> for ARG {
+//     #[inline]
+//     fn from(value: B) -> Self {
+//         Self::B(value)
+//     }
+// }
+
+impl From<F> for ARG {
     #[inline]
     fn from(value: F) -> Self {
         Self::F(value)
     }
 }
 
-impl From<U> for ICV {
+impl From<U> for ARG {
     #[inline]
     fn from(value: U) -> Self {
         Self::U(value)
     }
 }
 
-impl From<String> for ICV {
-    #[inline]
-    fn from(value: String) -> Self {
-        Self::S(value)
-    }
-}
+// impl From<String> for ARG {
+//     #[inline]
+//     fn from(value: String) -> Self {
+//         Self::S(value)
+//     }
+// }
 
-impl TryFrom<ICV> for f64 {
+impl TryFrom<ARG> for f64 {
     type Error = Error;
     #[inline]
-    fn try_from(value: ICV) -> Result<Self, Self::Error> {
+    fn try_from(value: ARG) -> Result<Self, Self::Error> {
         match value {
             F(F::CONST(c)) => Ok(c),
             _ => Err(Error::InvalidType("Ivalid type".into())),
@@ -65,10 +75,10 @@ impl TryFrom<ICV> for f64 {
     }
 }
 
-impl TryFrom<ICV> for [f64; 2] {
+impl TryFrom<ARG> for [f64; 2] {
     type Error = Error;
     #[inline]
-    fn try_from(value: ICV) -> Result<Self, Self::Error> {
+    fn try_from(value: ARG) -> Result<Self, Self::Error> {
         match value {
             F(F::CONST(c)) => Ok([c; 2]),
             U(U::CONST(c)) => Ok(c),
@@ -77,48 +87,19 @@ impl TryFrom<ICV> for [f64; 2] {
     }
 }
 
-#[derive(Clone, Copy, PartialEq, Eq)]
+#[derive(Clone, Copy, Hash, PartialEq, Eq)]
 pub enum B {
     I(usize),
     CONST(bool),
     VAR(usize),
 }
 
-// impl From<F> for B {
-//     fn from(value: F) -> Self {
-//         match value {
-//             F::CONST(c) => Self::CONST(!c.is_zero()),
-//             _ => Self::F(value),
-//         }
-//     }
-// }
-
 impl Debug for B {
     fn fmt(&self, f: &mut fmt::Formatter) -> Result<(), fmt::Error> {
         match self {
             Self::I(i) => write!(f, "b@{:?}", i),
             Self::CONST(c) => write!(f, "CONST({:?})", c),
-            Self::VAR(s) => write!(f, "VAR({:?})", s),
-        }
-    }
-}
-
-impl Hash for B {
-    #[inline]
-    fn hash<H: Hasher>(&self, state: &mut H) {
-        match self {
-            Self::I(u) => {
-                state.write_u8(1);
-                state.write_usize(*u);
-            }
-            Self::CONST(c) => {
-                state.write_u8(2);
-                state.write_u8(*c as u8);
-            }
-            Self::VAR(u) => {
-                state.write_u8(3);
-                state.write_usize(*u);
-            }
+            Self::VAR(u) => write!(f, "VAR({:?})", u),
         }
     }
 }
@@ -130,35 +111,22 @@ pub enum F {
     VAR(usize),
 }
 
-// impl TryFrom<ICV> for F {
-//     type Error = Error;
-//     #[inline]
-//     fn try_from(value: ICV) -> Result<Self, Self::Error> {
-//         match value {
-//             F(ficv) => Ok(ficv),
-//             U(U::CONST(c)) => Ok(F::CONST(c[0])),
-//             _ => Err(Error::InvalidType("Ivalid type".into())),
-//         }
-//     }
-// }
-
-// impl TryFrom<U> for F {
-//     type Error = Error;
-//     #[inline]
-//     fn try_from(value: U) -> Result<Self, Self::Error> {
-//         match value {
-//             U::F(ficv) => Ok(ficv),
-//             _ => Err(Error::InvalidType("Ivalid type".into())),
-//         }
-//     }
-// }
+impl From<U> for F {
+    fn from(value: U) -> Self {
+        match value {
+            U::CONST(c) => Self::CONST(c[0]),
+            U::I(i) => Self::I(i),
+            U::VAR(u) => Self::VAR(u),
+        }
+    }
+}
 
 impl Debug for F {
     fn fmt(&self, f: &mut fmt::Formatter) -> Result<(), fmt::Error> {
         match self {
             Self::I(i) => write!(f, "f@{:?}", i),
             Self::CONST(c) => write!(f, "CONST({:?})", c),
-            Self::VAR(s) => write!(f, "VAR({:?})", s),
+            Self::VAR(u) => write!(f, "VAR({:?})", u),
         }
     }
 }
@@ -204,27 +172,15 @@ pub enum U {
     VAR(usize),
 }
 
-// impl TryFrom<ICV> for U {
-//     type Error = Error;
-//     #[inline]
-//     fn try_from(value: ICV) -> Result<Self, Self::Error> {
-//         match value {
-//             U(uicv) => Ok(uicv),
-//             F(F::CONST(c)) => Ok(U::CONST([c; 2])),
-//             _ => Err(Error::InvalidType("Ivalid type".into())),
-//         }
-//     }
-// }
-
-// impl From<F> for U {
-//     fn from(value: F) -> Self {
-//         match value {
-//             F::CONST(c) => Self::CONST([c; 2]),
-//             F::VAR(u) => Self::FROM_F(IV::VAR(u)),
-//             F::I(i) => Self::FROM_F(IV::I(i)),
-//         }
-//     }
-// }
+impl From<F> for U {
+    fn from(value: F) -> Self {
+        match value {
+            F::CONST(c) => Self::CONST([c; 2]),
+            F::I(i) => Self::I(i),
+            F::VAR(u) => Self::VAR(u),
+        }
+    }
+}
 
 impl Debug for U {
     fn fmt(&self, f: &mut fmt::Formatter) -> Result<(), fmt::Error> {
@@ -276,6 +232,7 @@ impl Eq for U {}
 
 #[derive(Debug, Clone, PartialEq, Eq, Hash)]
 pub enum OP<FFN, UFN> {
+    BOP(BOP),
     FOP(FOP<FFN>),
     UOP(UOP<UFN>),
 }
@@ -298,11 +255,13 @@ impl<FFN, UFN> OP<FFN, UFN> {
     #[inline]
     fn order(&self) -> u32 {
         match self {
+            Self::BOP(BOP::CONST(_)) => 0,
             Self::FOP(FOP::CONST(_)) => 1,
             Self::UOP(UOP::CONST(_)) => 2,
 
-            Self::FOP(_) => 10,
-            Self::UOP(_) => 11,
+            Self::BOP(_) => 10,
+            Self::FOP(_) => 11,
+            Self::UOP(_) => 12,
         }
     }
 
@@ -322,31 +281,14 @@ impl<FFN, UFN> OP<FFN, UFN> {
     // }
 }
 
-// impl<M: Module> Hash for OP<M> {
-//     #[inline]
-//     fn hash<H: Hasher>(&self, state: &mut H) {
-//         match self {
-//             Self::FOP(op) => {
-//                 state.write_u8(1);
-//                 op.hash(state);
-//             }
-//             Self::UOP(op) => {
-//                 state.write_u8(2);
-//                 op.hash(state);
-//             }
-//         }
-//     }
-// }
-
 ///////////////////////////////////////////////////////////////////////////////////////////////////////////////////
 /// OPS that return bool type aka BOP
 ///////////////////////////////////////////////////////////////////////////////////////////////////////////////////
 
-#[derive(Debug, Clone)]
+#[derive(Debug, Clone, Hash, PartialEq, Eq)]
 pub enum BOP {
     //---- Primitive Value Types:
     CONST(bool),
-    VAR(usize),
 
     //---- Unary Ops:
     NOT(B),
@@ -356,25 +298,16 @@ pub enum BOP {
     AND(B, B),
 
     //---- Equality Ops:
-    BEQ(B, B),
-    BNE(B, B),
-
-    FEQ(F, F),
-    FNE(F, F),
-
-    UEQ(U, U),
-    UNE(U, U),
+    EQ(F, F),
+    NE(F, F),
+    EQU(U, U),
+    NEU(U, U),
 
     //---- Comparison Ops:
-    BLT(B, B),
-    BLTE(B, B),
-    BGTE(B, B),
-    BGT(B, B),
-
-    FLT(F, F),
-    FLTE(F, F),
-    FGTE(F, F),
-    FGT(F, F),
+    LT(F, F),
+    LE(F, F),
+    GE(F, F),
+    GT(F, F),
 }
 
 ///////////////////////////////////////////////////////////////////////////////////////////////////////////////////
@@ -397,22 +330,12 @@ pub enum FOP<FFN> {
     MUL(F, F),
     // A Div(n,d) is converted to a FMUL(n,FINV(d)).
     REM(F, F),
-    EXP(F, F),
+    POW(F, F),
 
+    // STD(FSTD),
     //---- Functions:
     FN(FFN),
 }
-
-// impl<FFN, UFN> TryFrom<OP<FFN, UFN>> for FOP<FFN> {
-//     type Error = Error;
-//     #[inline]
-//     fn try_from(value: OP<FFN, UFN>) -> Result<Self, Self::Error> {
-//         match value {
-//             OP::FOP(fop) => Ok(fop),
-//             _ => Err(Error::InvalidType("Ivalid type".into())),
-//         }
-//     }
-// }
 
 impl<FFN: PartialEq> PartialEq for FOP<FFN> {
     #[inline]
@@ -420,22 +343,12 @@ impl<FFN: PartialEq> PartialEq for FOP<FFN> {
         match (self, other) {
             (Self::CONST(s), Self::CONST(o)) => s.to_bits() == o.to_bits(),
             (Self::VAR(s), Self::VAR(o)) => s == o,
-            // (Self::FROM_B(s), Self::FROM_B(o)) => s == o,
             (Self::ADD(s0, s1), Self::ADD(o0, o1)) => (s0, s1) == (o0, o1) || (s0, s1) == (o1, o0),
             (Self::MUL(s0, s1), Self::MUL(o0, o1)) => (s0, s1) == (o0, o1) || (s0, s1) == (o1, o0),
             (Self::NEG(s), Self::NEG(o)) => s == o,
             (Self::INV(s), Self::INV(o)) => s == o,
             (Self::REM(s0, s1), Self::REM(o0, o1)) => (s0, s1) == (o0, o1),
-            (Self::EXP(s0, s1), Self::EXP(o0, o1)) => (s0, s1) == (o0, o1),
-            // (Self::NOT(s), Self::NOT(o)) => s == o,
-            // (Self::LT(s0, s1), Self::LT(o0, o1)) => (s0, s1) == (o0, o1),
-            // (Self::LTE(s0, s1), Self::LTE(o0, o1)) => (s0, s1) == (o0, o1),
-            // (Self::EQ(s0, s1), Self::EQ(o0, o1)) => (s0, s1) == (o0, o1) || (s0, s1) == (o1, o0),
-            // (Self::NE(s0, s1), Self::NE(o0, o1)) => (s0, s1) == (o0, o1) || (s0, s1) == (o1, o0),
-            // (Self::GT(s0, s1), Self::GT(o0, o1)) => (s0, s1) == (o0, o1),
-            // (Self::GTE(s0, s1), Self::GTE(o0, o1)) => (s0, s1) == (o0, o1),
-            // (Self::OR(s0, s1), Self::OR(o0, o1)) => (s0, s1) == (o0, o1) || (s0, s1) == (o1, o0),
-            // (Self::AND(s0, s1), Self::AND(o0, o1)) => (s0, s1) == (o0, o1) || (s0, s1) == (o1, o0),
+
             (Self::FN(s), Self::FN(o)) => s == o,
             _ => false,
         }
@@ -456,18 +369,10 @@ impl<FFN: Hash> Hash for FOP<FFN> {
                 state.write_u8(2);
                 state.write_usize(*u);
             }
-            // Self::FROM_B(b) => {
-            //     state.write_u8(3);
-            //     b.hash(state);
-            // }
             Self::NEG(a) => {
                 state.write_u8(4);
                 a.hash(state);
             }
-            // Self::NOT(a) => {
-            //     state.write_u8(5);
-            //     a.hash(state);
-            // }
             Self::INV(a) => {
                 state.write_u8(6);
                 a.hash(state);
@@ -485,49 +390,14 @@ impl<FFN: Hash> Hash for FOP<FFN> {
                 a0.hash(state);
                 a1.hash(state);
             }
-            Self::EXP(a0, a1) => {
+            Self::POW(a0, a1) => {
                 state.write_u8(10);
                 a0.hash(state);
                 a1.hash(state);
             }
-            // Self::LT(a0, a1) => {
-            //     state.write_u8(11);
-            //     a0.hash(state);
-            //     a1.hash(state);
-            // }
-            // Self::LTE(a0, a1) => {
-            //     state.write_u8(12);
-            //     a0.hash(state);
-            //     a1.hash(state);
-            // }
-            // Self::EQ(a0, a1) => {
-            //     state.write_u8(13);
-            //     state.write_u64(_hash(a0) ^ _hash(a1));
-            // }
-            // Self::NE(a0, a1) => {
-            //     state.write_u8(14);
-            //     state.write_u64(_hash(a0) ^ _hash(a1));
-            // }
-            // Self::GTE(a0, a1) => {
-            //     state.write_u8(15);
-            //     a0.hash(state);
-            //     a1.hash(state);
-            // }
-            // Self::GT(a0, a1) => {
-            //     state.write_u8(16);
-            //     a0.hash(state);
-            //     a1.hash(state);
-            // }
-            // Self::OR(a0, a1) => {
-            //     state.write_u8(17);
-            //     state.write_u64(_hash(a0) ^ _hash(a1));
-            // }
-            // Self::AND(a0, a1) => {
-            //     state.write_u8(18);
-            //     state.write_u64(_hash(a0) ^ _hash(a1));
-            // }
+
             Self::FN(ffn) => {
-                state.write_u8(20);
+                state.write_u8(21);
                 ffn.hash(state);
             }
         }
@@ -556,9 +426,10 @@ pub enum UOP<UFN> {
     MUL(U, U),
     // A Div(n,d) is converted to a FMUL(n,FINV(d)).
     REM(U, U),
-    EXP(U, U),
+    POW(U, U),
 
     //---- Functions:
+    // STD(USTD),
     FN(UFN),
 }
 
@@ -586,12 +457,11 @@ impl<UFN: PartialEq> PartialEq for UOP<UFN> {
             (Self::ADD(s0, s1), Self::ADD(o0, o1)) => (s0, s1) == (o0, o1) || (s0, s1) == (o1, o0),
             (Self::MUL(s0, s1), Self::MUL(o0, o1)) => (s0, s1) == (o0, o1) || (s0, s1) == (o1, o0),
             (Self::NEG(s), Self::NEG(o)) => s == o,
-            // (Self::NOT(s), Self::NOT(o)) => s == o,
+
             (Self::INV(s), Self::INV(o)) => s == o,
             (Self::REM(s0, s1), Self::REM(o0, o1)) => (s0, s1) == (o0, o1),
-            (Self::EXP(s0, s1), Self::EXP(o0, o1)) => (s0, s1) == (o0, o1),
-            // (Self::EQ(s0, s1), Self::EQ(o0, o1)) => (s0, s1) == (o0, o1) || (s0, s1) == (o1, o0),
-            // (Self::NE(s0, s1), Self::NE(o0, o1)) => (s0, s1) == (o0, o1) || (s0, s1) == (o1, o0),
+            (Self::POW(s0, s1), Self::POW(o0, o1)) => (s0, s1) == (o0, o1),
+
             (Self::FN(s), Self::FN(o)) => s == o,
             _ => false,
         }
@@ -622,10 +492,6 @@ impl<UFN: Hash> Hash for UOP<UFN> {
                 state.write_u8(5);
                 a.hash(state);
             }
-            // Self::NOT(a) => {
-            //     state.write_u8(5);
-            //     a.hash(state);
-            // }
             Self::INV(a) => {
                 state.write_u8(6);
                 a.hash(state);
@@ -643,19 +509,11 @@ impl<UFN: Hash> Hash for UOP<UFN> {
                 a0.hash(state);
                 a1.hash(state);
             }
-            Self::EXP(a0, a1) => {
+            Self::POW(a0, a1) => {
                 state.write_u8(10);
                 a0.hash(state);
                 a1.hash(state);
             }
-            // Self::EQ(a0, a1) => {
-            //     state.write_u8(13);
-            //     state.write_u64(_hash(a0) ^ _hash(a1));
-            // }
-            // Self::NE(a0, a1) => {
-            //     state.write_u8(14);
-            //     state.write_u64(_hash(a0) ^ _hash(a1));
-            // }
             Self::FN(ufn) => {
                 state.write_u8(15);
                 ufn.hash(state);
@@ -675,3 +533,92 @@ fn _hash<T: Hash>(obj: T) -> u64 {
 pub(crate) fn sort<FFN, UFN>(ops: &mut [OP<FFN, UFN>]) {
     ops.sort_by(|a, b| a.order().cmp(&b.order()))
 }
+
+// macro_rules! impl_std_fn {
+//     (
+//         $($fname:ident($($fargname:ident),*),)*
+//     ) => {
+//         use paste::paste;
+//         macro_rules! _type {
+//             ($name:ident, $T: ty)=>{
+//                 $T
+//             }
+//         }
+//         paste!{
+//             #[derive(Eq, PartialEq, Hash, Clone, Debug)]
+//             enum FSTD {
+//                 $($fname($(_type!($fargname, F)),*)),*
+//             }
+
+//             #[derive(Eq, PartialEq, Hash, Clone, Debug)]
+//             enum USTD {
+//                 $($fname($(_type!($fargname, U)),*)),*
+//             }
+
+//             #[inline]
+//             fn dispatch_stdfn<FFN, UFN>(name: &str, args: &[ARG]) -> Option<OP<FFN, UFN>>{
+//                 match (name, args) {
+//                     $((stringify!($fname), &[$(F(F::CONST($fargname))),*]) => {Some(FOP(FOP::CONST(f64::$fname($($fargname),*))))})*
+//                     $((stringify!($fname), &[$(F($fargname)),*]) => {Some(FOP(FOP::STD(FSTD::$fname($($fargname),*))))})*
+
+//                     $((stringify!($fname), &[$(ref $fargname @ (F(F::CONST(_)) | U(U::CONST(_)))),*]) => {Some(UOP(UOP::CONST(<[f64;2]>::$fname($($fargname.clone().try_into().unwrap()),*))))})*
+//                     $((stringify!($fname), &[$(U($fargname)),*]) => {Some(UOP(UOP::STD(USTD::$fname($($fargname),*))))})*
+
+//                     _ => None,
+//                 }
+//             }
+
+//             impl<M, T, CTX> FEvaler<M, T, CTX> for FSTD
+//             where
+//             M: Module,
+//             T: Float,
+//                 CTX: Context<T>,
+//             {
+//                 #[inline]
+//                 fn eval(&self, en: &Expression<M>, ctx: &CTX) -> T {
+//                     match self {
+//                         $(Self::$fname($($fargname),*) => {T::$fname($($fargname.eval(en, ctx)),*)})*
+//                         _=> unreachable!(),
+//                     }
+//                 }
+//             }
+
+//             impl<M, T, CTX> UEvaler<M, T, CTX> for USTD
+//             where
+//             M: Module<FFN: FEvaler<>>,
+//             T: Float,
+//                 CTX: Context<T>,
+//             {
+//                 #[inline]
+//                 fn eval(&self, en: &Expression<M>, ctx: &CTX) -> [T;2] {
+//                     match self {
+//                         $(Self::$fname($($fargname),*) => {<[T;2]>::$fname($($fargname.eval(en, ctx)),*)})*
+//                         _=> unreachable!(),
+//                     }
+//                 }
+//             }
+//         }
+//     };
+// }
+
+// impl_std_fn!(
+//     floor(x),
+//     ceil(x),
+//     round(x),
+//     recip(x),
+//     abs(x),
+//     ln(x),
+//     min(x, y),
+//     max(x, y),
+//     pow(x, n),
+//     sqrt(x),
+//     cbrt(x),
+//     hypot(x, y),
+//     sin(x),
+//     cos(x),
+//     bias(x, b),
+//     fit(x, oldmin, oldmax, newmin, newmax),
+//     fit01(x, newmin, newmax),
+//     clamp(x, min, max),
+//     clamp01(x),
+// );

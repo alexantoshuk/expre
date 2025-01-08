@@ -191,7 +191,7 @@ impl Ast {
                 EMulAssign => self.push_expr(Expr(e, vec![(Mul, Value::ECV(ecv))])),
                 EDivAssign => self.push_expr(Expr(e, vec![(Div, Value::ECV(ecv))])),
                 EModAssign => self.push_expr(Expr(e, vec![(Rem, Value::ECV(ecv))])),
-                EExpAssign => self.push_expr(Expr(e, vec![(Exp, Value::ECV(ecv))])),
+                EExpAssign => self.push_expr(Expr(e, vec![(Pow, Value::ECV(ecv))])),
                 _ => unreachable!(),
             };
             let ecv = E(i);
@@ -543,13 +543,13 @@ fn read_binaryop(bs: &mut &[u8]) -> Result<Option<BinaryOp>, Error> {
             }
             b'^' => {
                 skip(bs);
-                Ok(Some(Exp))
+                Ok(Some(Pow))
             }
             b'<' => {
                 skip(bs);
                 if peek_is(bs, 0, b'=') {
                     skip(bs);
-                    Ok(Some(LTE))
+                    Ok(Some(LE))
                 } else {
                     Ok(Some(LT))
                 }
@@ -558,7 +558,7 @@ fn read_binaryop(bs: &mut &[u8]) -> Result<Option<BinaryOp>, Error> {
                 skip(bs);
                 if peek_is(bs, 0, b'=') {
                     skip(bs);
-                    Ok(Some(GTE))
+                    Ok(Some(GE))
                 } else {
                     Ok(Some(GT))
                 }
