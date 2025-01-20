@@ -1,19 +1,42 @@
 //#![warn(missing_docs)]
+pub mod builtins;
 pub mod compiler;
 pub mod context;
 pub mod error;
 pub mod evaler;
 pub mod float;
-pub mod ops;
+pub mod op;
 pub mod parser;
 pub mod tokens;
 pub use self::compiler::*;
 pub use self::context::*;
 pub use self::error::Error;
 pub use self::evaler::*;
-
+// mod traits;
 pub use self::parser::{parse, Ast, ParseExpr};
 use std::fmt;
+
+pub struct Signature<'a> {
+    name: &'a str,
+    args: &'a [op::ARG],
+}
+
+impl<'a> fmt::Display for Signature<'a> {
+    fn fmt(&self, f: &mut fmt::Formatter<'_>) -> fmt::Result {
+        write!(f, "{}(", self.name);
+        let mut iter_args = self.args.iter();
+        if let Some(arg) = iter_args.next() {
+            write!(f, "{}", arg.name());
+            for arg in iter_args {
+                write!(f, ",{}", arg.name())?;
+            }
+        }
+        write!(f, ")")
+    }
+}
+pub fn signature<'a>(name: &'a str, args: &'a [op::ARG]) -> Signature<'a> {
+    Signature { name, args }
+}
 
 fn debug_indexed_list<T>(f: &mut fmt::Formatter, lst: &[T]) -> Result<(), fmt::Error>
 where
@@ -58,7 +81,7 @@ macro_rules! map2 {
         [
             $f($($a[0]),+),
             $f($($a[1]),+),
-        ]
+        ].into()
     };
 }
 pub(crate) use map2;
@@ -69,7 +92,7 @@ macro_rules! map3 {
             $f($($a[0]),+),
             $f($($a[1]),+),
             $f($($a[2]),+),
-        ]
+        ].into()
     };
 }
 pub(crate) use map3;
@@ -81,19 +104,89 @@ macro_rules! map4 {
             $f($($a[1]),+),
             $f($($a[2]),+),
             $f($($a[3]),+),
-        ]
+        ].into()
     };
 }
 pub(crate) use map4;
+
+macro_rules! max {
+    // Base case: when there's only one argument
+    ($x:expr) => {
+        &$x
+    };
+    // Recursive case: compare the first argument with the max of the rest
+    ($x:expr, $($rest:expr),+) => {
+        std::cmp::max(&$x, crate::max!($($rest),+))
+    };
+}
+pub(crate) use max;
+
+macro_rules! compile_op {
+    ($ename:ident, $fname:ident, ($($a:ident),+ ))=> {
+        match crate::max!($($a),+) {
+            F(_) | B(_) => {
+                match ($($a.try_into().unwrap()),+) {
+                    ($(F::CONST($a)),+) => FOP(FOP::CONST(f64::$fname($($a),+))),
+                    ($($a),+) => FOP(FOP::$ename($($a),+)),
+                }
+            }
+            F2(_) => {
+                match ($($a.try_into().unwrap()),+) {
+                    ($(F2::CONST($a)),+) => FOP2(FOP2::CONST(map2!(f64::$fname, $($a),+))),
+                    ($($a),+) => FOP2(FOP2::$ename($($a),+)),
+                }
+            }
+            F3(_) => {
+                match ($($a.try_into()?),+) {
+                    ($(F3::CONST($a)),+) => FOP3(FOP3::CONST(map3!(f64::$fname, $($a),+))),
+                    ($($a),+) => FOP3(FOP3::$ename($($a),+)),
+                }
+            }
+
+            _ => return Err(Error::Undefined("".into()))
+        }
+    };
+}
+
+pub(crate) use compile_op;
+
+macro_rules! compile_stdfn {
+    ($ename:ident, $fname:ident, ($($a:ident),+ ))=> {
+        match crate::max!($($a),+) {
+            F(_) | B(_) => {
+                match ($($a.try_into().ok()?),+) {
+                    ($(F::CONST($a)),+) => FOP(FOP::CONST(f64::$fname($($a),+))),
+                    ($($a),+) => FOP(FOP::STDFN(STDFN::$ename($($a),+))),
+                }
+            }
+            F2(_) => {
+                match ($($a.try_into().ok()?),+) {
+                    ($(F2::CONST($a)),+) => FOP2(FOP2::CONST(map2!(f64::$fname, $($a),+))),
+                    ($($a),+) => FOP2(FOP2::STDFN(STDFN2::$ename($($a),+))),
+                }
+            }
+            F3(_) => {
+                match ($($a.try_into().ok()?),+) {
+                    ($(F3::CONST($a)),+) => FOP3(FOP3::CONST(map3!(f64::$fname, $($a),+))),
+                    ($($a),+) => FOP3(FOP3::STDFN(STDFN3::$ename($($a),+))),
+                }
+            }
+
+            _ => return None
+        }
+    };
+}
+
+pub(crate) use compile_stdfn;
 // #[macro_export]
 // macro_rules! op_func1 {
 //     ($f:ident, $args: expr) => {
 //         match $args {
 //             &[FICV(FICV::CONST(c))] => Some(F(F::CONST(f32::$f(c)))),
 //             &[FICV(x)] => Some(F(F::FUNC(F_F(T::$f, x)))),
-//             &[UICV(UICV::CONST(c))] => Some(U(U::CONST(crate::map2!(f32::$f, c)))),
+//             &[UICV(UICV::CONST(c))] => Some(F2(F2::CONST(crate::map2!(f32::$f, c)))),
 //             &[UICV(x)] => unimplemented!(),
-//             // &[UICV(x)] => Some(UOP(UFUNC(U_U(T::$f, x)))),
+//             // &[UICV(x)] => Some(FOP2(UFUNC(U_U(T::$f, x)))),
 //             _ => None,
 //         }
 //     };
@@ -114,7 +207,7 @@ pub(crate) use map4;
 //                     }
 //                     _ => unimplemented!(), //UFUNC(U_UU(T::$f, x0, x1)),
 //                 };
-//                 Some(UOP(uop))
+//                 Some(FOP2(uop))
 //             }
 //             _ => None,
 //         }
@@ -134,7 +227,7 @@ let resolver = expre::parse()
 //                 $(_($fstr_: literal, $($fargname_:ident : $fargty_:ty),*) => $fname_:ident($($farg_:expr),*),)*
 //             },
 
-//             U {
+//             F2 {
 //                 $(($ustr: literal, $($uargname:ident : $uargty:ty),*) => $uname:ident($($uarg:expr),*),)*
 //                 $(_($ustr_: literal, $($uargname_:ident : $uargty_:ty),*) => $uname_:ident($($uarg_:expr),*),)*
 //             },
@@ -148,7 +241,7 @@ let resolver = expre::parse()
 //             }
 
 //             #[derive(Eq, PartialEq, Hash, Clone, Debug)]
-//             $pub enum [<$module_name U>] {
+//             $pub enum [<$module_name F2>] {
 //                 $($uname($($uargty),*)),*
 //             }
 
@@ -164,8 +257,8 @@ let resolver = expre::parse()
 //             }
 
 //             impl Module for $module_name {
-//                 type FFN = [<$module_name F>];
-//                 type UFN = [<$module_name U>];
+//                 type FN = [<$module_name F>];
+//                 type FN2 = [<$module_name F2>];
 
 //                 #[inline]
 //                 fn dispatch_var(&self, name: &str) -> Option<&ARG> {
@@ -173,21 +266,21 @@ let resolver = expre::parse()
 //                 }
 
 //                 #[inline]
-//                 fn dispatch_func(&self, name: &str, args: &[ARG]) -> Option<OP<Self::FFN, Self::UFN>>{
+//                 fn dispatch_fn(&self, name: &str, args: &[ARG]) -> Option<OP<Self::FN, Self::FN2>>{
 //                     match (name, args) {
-//                         $(($fstr_, &[$($fargty_($fargname_)),*]) => {Some(FOP(FOP::FN(Self::FFN::$fname_($($farg_.into()),*))))})*
+//                         $(($fstr_, &[$($fargty_($fargname_)),*]) => {Some(FOP(FOP::FN(Self::FN::$fname_($($farg_.into()),*))))})*
 //                         $(("$fname", &[$($fargty(F::CONST($fargname))),*]) => {Some(FOP(FOP::CONST(f64::$fname($($fargname),*))))})*
-//                         $(("$fname", &[$($fargty($fargname)),*]) => {Some(FOP(FOP::FN(Self::FFN::$fname($($farg.into()),*))))})*
+//                         $(("$fname", &[$($fargty($fargname)),*]) => {Some(FOP(FOP::FN(Self::FN::$fname($($farg.into()),*))))})*
 
-//                         $(($ustr_, &[$($uargty_($uargname_)),*]) => {Some(UOP(UOP::FN(Self::UFN::$uname_($($uarg_.into()),*))))})*
-//                         $(($ustr, &[$($uargname @ (F(F::CONST(_)) | U(U::CONST(_)))),*]) => {Some(UOP(UOP::CONST(<[f64;2]>::$uname($($uargname.into()),*))))})*
-//                         $(($ustr, &[$($uargty($uargname)),*]) => {Some(UOP(UOP::FN(Self::UFN::$uname($($uarg.into()),*))))})*
+//                         $(($ustr_, &[$($uargty_($uargname_)),*]) => {Some(FOP2(FOP2::FN(Self::FN2::$uname_($($uarg_.into()),*))))})*
+//                         $(($ustr, &[$($uargname @ (F(F::CONST(_)) | F2(F2::CONST(_)))),*]) => {Some(FOP2(FOP2::CONST(<[f64;2]>::$uname($($uargname.into()),*))))})*
+//                         $(($ustr, &[$($uargty($uargname)),*]) => {Some(FOP2(FOP2::FN(Self::FN2::$uname($($uarg.into()),*))))})*
 //                         _ => None,
 //                     }
 //                 }
 //             }
 
-//             impl<T, CTX> FEvaler<$module_name, T, CTX> for [<$module_name F>]
+//             impl<T, CTX> EvalF<$module_name, T, CTX> for [<$module_name F>]
 //             where
 //                 T: Float,
 //                 CTX: Context<T>,
@@ -201,7 +294,7 @@ let resolver = expre::parse()
 //                 }
 //             }
 
-//             impl<T, CTX> UEvaler<$module_name, T, CTX> for [<$module_name U>]
+//             impl<T, CTX> EvalF2<$module_name, T, CTX> for [<$module_name F2>]
 //             where
 //                 T: Float,
 //                 CTX: Context<T>,
@@ -222,8 +315,8 @@ let resolver = expre::parse()
 //     ($pub:vis $module_name:ident<$T:ty> {
 //         $(F::$fname:ident($($fargname:ident : $fargty:ty),*);)*
 //         $(@F::$fname_:ident($($fargname_:ident : $fargty_:ty),*) => $fname2_:ident($($fargname2_:expr),*);)*
-//         $(U::$uname:ident($($uargname:ident : $uargty:ty),*);)*
-//         $(@U::$uname_:ident($($uargname_:ident : $uargty_:ty),*) => $uname2_:ident($($uargname2_:expr),*);)*
+//         $(F2::$uname:ident($($uargname:ident : $uargty:ty),*);)*
+//         $(@F2::$uname_:ident($($uargname_:ident : $uargty_:ty),*) => $uname2_:ident($($uargname2_:expr),*);)*
 //     }) => {
 //         use paste::paste;
 
@@ -234,7 +327,7 @@ let resolver = expre::parse()
 //             }
 
 //             #[derive(Eq, PartialEq, Hash, Clone, Debug)]
-//             $pub enum [<$module_name U>] {
+//             $pub enum [<$module_name F2>] {
 //                 $($uname($($uargty),*)),*
 //             }
 
@@ -254,8 +347,8 @@ let resolver = expre::parse()
 //             }
 
 //             impl Module for $module_name {
-//                 type FFN = [<$module_name F>];
-//                 type UFN = [<$module_name U>];
+//                 type FN = [<$module_name F>];
+//                 type FN2 = [<$module_name F2>];
 
 //                 #[inline]
 //                 fn dispatch_var(&self, name: &str) -> Option<&ARG> {
@@ -263,22 +356,22 @@ let resolver = expre::parse()
 //                 }
 
 //                 #[inline]
-//                 fn dispatch_func(&self, name: &str, args: &[ARG]) -> Option<OP<Self::FFN, Self::UFN>>{
+//                 fn dispatch_fn(&self, name: &str, args: &[ARG]) -> Option<OP<Self::FN, Self::FN2>>{
 //                     match (name, args) {
-//                         $((stringify!($fname_), &[$($fargty_($fargname_)),*]) => {Some(FOP(FOP::FN(Self::FFN::$fname2_($($fargname2_),*))))})*
+//                         $((stringify!($fname_), &[$($fargty_($fargname_)),*]) => {Some(FOP(FOP::FN(Self::FN::$fname2_($($fargname2_),*))))})*
 //                         $((stringify!($fname), &[$(ref $fargname @ (F(F::CONST(_)) | $fargty($fargty::CONST(_)))),*]) => {Some(FOP(FOP::CONST(f64::$fname($($fargname.clone().try_into().unwrap()),*))))})*
-//                         $((stringify!($fname), &[$($fargty($fargname)),*]) => {Some(FOP(FOP::FN(Self::FFN::$fname($($fargname),*))))})*
+//                         $((stringify!($fname), &[$($fargty($fargname)),*]) => {Some(FOP(FOP::FN(Self::FN::$fname($($fargname),*))))})*
 
-//                         $((stringify!($uname_), &[$($uargty_($uargname_)),*]) => {Some(FOP(FOP::FN(Self::FFN::$uname2_($($uargname2_),*))))})*
-//                         $((stringify!($uname), &[$(ref $uargname @ (F(F::CONST(_)) | $uargty($uargty::CONST(_)))),*]) => {Some(UOP(UOP::CONST(<[f64;2]>::$uname($($uargname.clone().try_into().unwrap()),*))))})*
-//                         $((stringify!($uname), &[$($uargty($uargname)),*]) => {Some(UOP(UOP::FN(Self::UFN::$uname($($uargname),*))))})*
+//                         $((stringify!($uname_), &[$($uargty_($uargname_)),*]) => {Some(FOP(FOP::FN(Self::FN::$uname2_($($uargname2_),*))))})*
+//                         $((stringify!($uname), &[$(ref $uargname @ (F(F::CONST(_)) | $uargty($uargty::CONST(_)))),*]) => {Some(FOP2(FOP2::CONST(<[f64;2]>::$uname($($uargname.clone().try_into().unwrap()),*))))})*
+//                         $((stringify!($uname), &[$($uargty($uargname)),*]) => {Some(FOP2(FOP2::FN(Self::FN2::$uname($($uargname),*))))})*
 
 //                         _ => None,
 //                     }
 //                 }
 //             }
 
-//             impl FEvaler<$module_name, $T> for [<$module_name F>]
+//             impl EvalF<$module_name, $T> for [<$module_name F>]
 
 //             {
 //                 #[inline]
@@ -290,7 +383,7 @@ let resolver = expre::parse()
 //                 }
 //             }
 
-//             impl UEvaler<$module_name, $T> for [<$module_name U>]
+//             impl EvalF2<$module_name, $T> for [<$module_name F2>]
 
 //             {
 //                 #[inline]
@@ -312,8 +405,8 @@ let resolver = expre::parse()
 //     ($pub:vis $module_name:ident<$T:ty> {
 //         $(F::$fname:ident($($fargname:ident : $fargty:ty),*);)*
 //         $(@F::$fname_:ident($($fargname_:ident : $fargty_:ty),*) => $fname2_:ident($($fargname2_:expr),*);)*
-//         $(U::$uname:ident($($uargname:ident : $uargty:ty),*);)*
-//         $(@U::$uname_:ident($($uargname_:ident : $uargty_:ty),*) => $uname2_:ident($($uargname2_:expr),*);)*
+//         $(F2::$uname:ident($($uargname:ident : $uargty:ty),*);)*
+//         $(@F2::$uname_:ident($($uargname_:ident : $uargty_:ty),*) => $uname2_:ident($($uargname2_:expr),*);)*
 //     }) => {
 //         crate::_module! {
 //             $pub $module_name<$T> {
@@ -338,27 +431,27 @@ let resolver = expre::parse()
 //                 F::clamp01(x:F);
 //                 $(F::$fname($($fargname : $fargty),*);)*
 //                 $(@F::$fname_($($fargname_ : $fargty_),*) => $fname2_($($fargname2_),*);)*
-//                 U::floor(x:U);
-//                 U::ceil(x:U);
-//                 U::round(x:U);
-//                 U::recip(x:U);
-//                 U::abs(x:U);
-//                 U::ln(x:U);
-//                 U::min(x:U, y:U);
-//                 U::max(x:U, y:U);
-//                 U::pow(x:U, n:U);
-//                 U::sqrt(x:U);
-//                 U::cbrt(x:U);
-//                 U::hypot(x:U, y:U);
-//                 U::sin(x:U);
-//                 U::cos(x:U);
-//                 U::bias(x:U,b:U);
-//                 U::fit(x:U, oldmin:U, oldmax:U, newmin:U, newmax:U);
-//                 U::fit01(x:U, newmin:U, newmax:U);
-//                 U::clamp(x:U, min:U, max:U);
-//                 U::clamp01(x:U);
-//                 $(U::$uname($($uargname : $uargty),*);)*
-//                 $(@U::$uname_($($uargname_ : $uargty_),*) => $uname2_($($uargname2_),*);)*
+//                 F2::floor(x:F2);
+//                 F2::ceil(x:F2);
+//                 F2::round(x:F2);
+//                 F2::recip(x:F2);
+//                 F2::abs(x:F2);
+//                 F2::ln(x:F2);
+//                 F2::min(x:F2, y:F2);
+//                 F2::max(x:F2, y:F2);
+//                 F2::pow(x:F2, n:F2);
+//                 F2::sqrt(x:F2);
+//                 F2::cbrt(x:F2);
+//                 F2::hypot(x:F2, y:F2);
+//                 F2::sin(x:F2);
+//                 F2::cos(x:F2);
+//                 F2::bias(x:F2,b:F2);
+//                 F2::fit(x:F2, oldmin:F2, oldmax:F2, newmin:F2, newmax:F2);
+//                 F2::fit01(x:F2, newmin:F2, newmax:F2);
+//                 F2::clamp(x:F2, min:F2, max:F2);
+//                 F2::clamp01(x:F2);
+//                 $(F2::$uname($($uargname : $uargty),*);)*
+//                 $(@F2::$uname_($($uargname_ : $uargty_),*) => $uname2_($($uargname2_),*);)*
 //             }
 //         }
 //     };

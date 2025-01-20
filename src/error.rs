@@ -79,12 +79,12 @@ pub enum Error {
     /// You can define variables/functions with a Namespace.
     Undefined(String),
 
+    InvalidType(String),
+
     /// This error should never occur because it is only produced by code paths
     /// that should never execute.  This is more performant than using the
     /// `unreachable!()` macro.
     Unreachable,
-
-    InvalidType(String),
 }
 
 impl std::error::Error for Error {
