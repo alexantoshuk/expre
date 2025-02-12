@@ -13,30 +13,29 @@ pub(crate) use crate::tokens::ECV::*;
 impl Display for ECV {
     fn fmt(&self, f: &mut fmt::Formatter) -> Result<(), fmt::Error> {
         match self {
-            E(i) => write!(f, "@{i}"),
-            Const(v) => write!(f, "Const({v})"),
-            Var(s) => write!(f, "Var(\"{s}\")"),
+            Self::E(i) => write!(f, "@{i}"),
+            Self::Const(v) => write!(f, "Const({v})"),
+            Self::Var(s) => write!(f, "Var(\"{s}\")"),
         }
     }
 }
 
-/// A `Value` can be a Constant, a UnaryOp, a StdFunc, or a PrintFunc.
 #[derive(PartialEq, Debug)]
 pub enum Value {
     ECV(ECV),
     UnaryOp(UnaryOp),
-    AssignOp(String, AssignOp),
     Func(String, Option<String>, Vec<ECV>),
     List(Vec<ECV>),
+    Index(ECV, ECV),
 }
 pub(crate) use crate::tokens::Value::*;
 
 impl Display for Value {
     fn fmt(&self, f: &mut fmt::Formatter) -> Result<(), fmt::Error> {
         match self {
-            ECV(ecv) => write!(f, "{ecv}"),
-            UnaryOp(uop) => write!(f, "{uop}"),
-            Func(name, sarg, args) => {
+            Self::ECV(ecv) => write!(f, "{}", ecv),
+            Self::UnaryOp(uop) => write!(f, "{uop}"),
+            Self::Func(name, sarg, args) => {
                 if let Some(sarg) = sarg {
                     write!(f, "Func(\"{name}\", \"{sarg}\"")?;
                     for arg in args {
@@ -51,8 +50,8 @@ impl Display for Value {
                     write!(f, ")")
                 }
             }
-            List(args) => write!(f, "List({args:?})"),
-            AssignOp(_, _) => Ok(()),
+            Self::List(args) => write!(f, "List({args:?})"),
+            Self::Index(src, index) => write!(f, "{src}[{index}])"),
         }
     }
 }
@@ -68,11 +67,12 @@ pub(crate) use crate::tokens::UnaryOp::*;
 impl Display for UnaryOp {
     fn fmt(&self, f: &mut fmt::Formatter) -> Result<(), fmt::Error> {
         match self {
-            Neg(ecv) => write!(f, "-{ecv}"),
-            Not(ecv) => write!(f, "!{ecv}"),
+            Self::Neg(ecv) => write!(f, "-{ecv}"),
+            Self::Not(ecv) => write!(f, "!{ecv}"),
         }
     }
 }
+
 /// Binary Operators
 #[derive(Debug, PartialEq, PartialOrd, Copy, Clone)]
 pub enum BinaryOp {
@@ -121,25 +121,39 @@ impl Display for BinaryOp {
 pub enum AssignOp {
     // Sorted in order of precedence (low-priority to high-priority):
     // Keep this order in-sync with evaler.rs.  (Search for 'rtol' and 'ltor'.)
-    EAssign,
-    EAddAssign,
-    ESubAssign,
-    EMulAssign,
-    EDivAssign,
-    EModAssign,
-    EExpAssign,
+    Assign,
+    AddAssign,
+    SubAssign,
+    MulAssign,
+    DivAssign,
+    RemAssign,
+    PowAssign,
+}
+
+impl From<AssignOp> for BinaryOp {
+    fn from(value: AssignOp) -> Self {
+        match value {
+            AddAssign => Add,
+            SubAssign => Sub,
+            MulAssign => Mul,
+            DivAssign => Div,
+            RemAssign => Rem,
+            PowAssign => Pow,
+            _ => unreachable!(),
+        }
+    }
 }
 
 impl Display for AssignOp {
     fn fmt(&self, f: &mut fmt::Formatter) -> Result<(), fmt::Error> {
         match self {
-            EAssign => write!(f, "="),
-            EAddAssign => write!(f, "+="),
-            ESubAssign => write!(f, "-="),
-            EMulAssign => write!(f, "*="),
-            EDivAssign => write!(f, "/="),
-            EModAssign => write!(f, "%="),
-            EExpAssign => write!(f, "^="),
+            Assign => write!(f, "="),
+            AddAssign => write!(f, "+="),
+            SubAssign => write!(f, "-="),
+            MulAssign => write!(f, "*="),
+            DivAssign => write!(f, "/="),
+            RemAssign => write!(f, "%="),
+            PowAssign => write!(f, "^="),
         }
     }
 }

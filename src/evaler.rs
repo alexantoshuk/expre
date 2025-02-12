@@ -1,4 +1,4 @@
-use crate::builtins::Builtins;
+// use crate::builtins::Builtins;
 use crate::compiler::*;
 use crate::context::*;
 use crate::float::*;
@@ -101,11 +101,12 @@ where
     fn eval(&self, ex: &Expression<M>, ctx: &CTX) -> Self::Output {
         match self {
             Self::CONST(c) => <CTX::T as Float>::Mask::from_bool(*c),
-            Self::VAR(offset) => ctx.f(*offset).to_mask(),
+            Self::VAR(GLOBAL(offset)) => ctx.f(*offset).to_mask(),
             Self::I(i) => match ex.get(*i) {
                 BOP(o) => o.eval(ex, ctx),
                 _ => unreachable!(),
             },
+            _ => unimplemented!(),
         }
     }
 }
@@ -138,11 +139,12 @@ where
     fn eval(&self, ex: &Expression<M>, ctx: &CTX) -> Self::Output {
         match self {
             Self::CONST(c) => CTX::T::from_f64(*c),
-            Self::VAR(offset) => ctx.f(*offset),
+            Self::VAR(GLOBAL(offset)) => ctx.f(*offset),
             Self::I(i) => match ex.get(*i) {
                 FOP(o) => o.eval(ex, ctx),
                 _ => unreachable!(),
             },
+            _ => unimplemented!(),
         }
     }
 }
@@ -157,12 +159,13 @@ where
     fn eval(&self, ex: &Expression<M>, ctx: &CTX) -> Self::Output {
         match self {
             Self::CONST([x, y]) => [CTX::T::from_f64(*x), CTX::T::from_f64(*y)],
-            Self::VAR(offset) => ctx.f2(*offset),
+            Self::VAR(GLOBAL(offset)) => ctx.f2(*offset),
             Self::I(i) => match ex.get(*i) {
                 FOP2(o) => o.eval(ex, ctx),
                 _ => unreachable!(),
             },
             Self::F(f) => [f.eval(ex, ctx); 2],
+            _ => unimplemented!(),
         }
     }
 }
@@ -181,12 +184,13 @@ where
                 CTX::T::from_f64(*y),
                 CTX::T::from_f64(*z),
             ],
-            Self::VAR(offset) => ctx.f3(*offset),
+            Self::VAR(GLOBAL(offset)) => ctx.f3(*offset),
             Self::I(i) => match ex.get(*i) {
                 FOP3(o) => o.eval(ex, ctx),
                 _ => unreachable!(),
             },
             Self::F(f) => [f.eval(ex, ctx); 3],
+            _ => unimplemented!(),
         }
     }
 }
@@ -222,6 +226,7 @@ where
                 Mask::select(b.eval(ex, ctx), then.eval(ex, ctx), els.eval(ex, ctx))
             }
             Self::CONST(c) => Mask::from_bool(*c),
+            _ => unreachable!(),
         }
     }
 }
@@ -246,7 +251,8 @@ where
             }
             Self::STDFN(f) => f.eval(ex, ctx),
             Self::CONST(c) => Float::from_f64(*c),
-            Self::VAR(offset) => ctx.f(*offset),
+            Self::VAR(GLOBAL(offset)) => ctx.f(*offset),
+            _ => unimplemented!(),
         }
     }
 }
@@ -272,7 +278,8 @@ where
             }
             Self::STDFN(f) => f.eval(ex, ctx),
             Self::CONST(c) => map2!(Float::from_f64, c),
-            Self::VAR(offset) => ctx.f2(*offset),
+            Self::VAR(GLOBAL(offset)) => ctx.f2(*offset),
+            _ => unimplemented!(),
         }
     }
 }
@@ -298,7 +305,8 @@ where
             }
             Self::STDFN(f) => f.eval(ex, ctx),
             Self::CONST(c) => map3!(Float::from_f64, c),
-            Self::VAR(offset) => ctx.f3(*offset),
+            Self::VAR(GLOBAL(offset)) => ctx.f3(*offset),
+            _ => unimplemented!(),
         }
     }
 }
@@ -311,13 +319,15 @@ mod test {
     use crate::parser::Ast;
     #[test]
     fn test_eval() {
-        let expr_str = "a=5+id;c=a+2;c";
+        let expr_str = "v=2;a=5+id;b=[5,a];a = a+[6,2];c=(a+2)*(a+1)*4;c*b+v";
+        // let expr_str = "(2*id)+(2*id)+(2*id)*2+1";
         // macro_rules! apply_context {
         //     (struct $NAME: ident { }) => {};
         // }
 
         // #[repr(C)]
         // #[derive(Debug, Clone)]
+
         // struct Data {
         //     buffer: Box<u8>,
         //     offsets: IndexMap<String, ARG>,
@@ -336,15 +346,32 @@ mod test {
         //         }
         //     }
         // }
+        #[derive(Clone, Debug)]
+        pub struct Builtins {
+            // pub vars: IndexMap<String, ARG>,
+        }
 
-        let mmm = Builtins {
-            vars: IndexMap::from([
-                ("id".into(), F(F::VAR(0))),
-                ("b".into(), F(F::VAR(1))),
-                ("uv".into(), F2(F2::VAR(2))),
-                ("pid".into(), F(F::CONST(1.0))),
-            ]),
-        };
+        impl Module for Builtins {
+            #[inline]
+            fn dispatch_ident(&self, name: &str) -> Option<OP> {
+                match name {
+                    "id" => Some(FOP(FOP::VAR(GLOBAL(0)))),
+                    "b" => Some(FOP(FOP::VAR(GLOBAL(1)))),
+                    "uv" => Some(FOP2(FOP2::VAR(GLOBAL(2)))),
+                    "pid" => Some(FOP(FOP::CONST(1.0))),
+                    _ => None,
+                }
+            }
+        }
+        let mmm = Builtins {};
+        //  {
+        //     vars: IndexMap::from([
+        //         ("id".into(), F(F::VAR(0))),
+        //         ("b".into(), F(F::VAR(1))),
+        //         ("uv".into(), F2(F2::VAR(2))),
+        //         ("pid".into(), F(F::CONST(1.0))),
+        //     ]),
+        // };
 
         #[repr(C)]
         #[derive(Debug, Clone)]
@@ -400,9 +427,9 @@ mod test {
         // eprintln!("CEXPR: {:?}", ok);
         // data.x = 0.0;
         // }
-
-        let v = ex.eval(&ctx.as_slice());
         println!("CEXPR:\n{:?}", ex);
+        let v = ex.eval(&ctx.as_slice());
+
         assert_eq!(Value::F2([88956.0; 2]), v);
 
         // let expr_str = "a=((1+-5.345) +4 +xxxxxxxx +5)-xxxxxxxx;a +((((87))) - tan(xxxxxxxx)) + 1.3446346346346324e-2 + (97 + (((15 / 55*xxxxxxxx * ((sin(-31))) + 35))) + (15 - (cos(9))) - (39 / 26) / 20*cos(yyyyyyyyyyyyy) / 91 +(abs(-xxxxxxxx))+ 27 / (33 * sin(26) + 28-(yyyyyyyyyyyyy) - a*a+(7) / 10*tan(yyyyyyyyyyyyy) + 66 * 6) + sin(60) / 35 - ((29) - (cos(69)) / 44 / (92)) / (cos(89)) + 2 + 87 / 47 * ((2)) * 83 / 98 * 42 / (((67)) * ((97))) / (34 / 89 + 77) - 29 + 70 * (20)) + ((((((92))) + 23 * (98) / (95) + (((99) * (41))) + (5 + 41) + 10) - (36) / (6 + 80 * 52 + (90))))";

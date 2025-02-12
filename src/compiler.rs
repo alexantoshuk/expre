@@ -24,6 +24,8 @@
 //! * Variable-length `Expr`/`Value` Ast nodes are converted into constant-sized `OP` nodes.
 //! * The `F` enumeration helps to eliminate expensive function calls.
 
+use indexmap::{map::Entry, IndexMap};
+
 use crate::builtins;
 use crate::context::*;
 use crate::debug_indexed_list;
@@ -34,6 +36,8 @@ use crate::parser::*;
 use crate::tokens::{self, *};
 use crate::{compile_op, map2, map3, signature};
 use std::fmt::{self, Debug};
+use std::ops::Add;
+use std::usize;
 
 impl Ast {
     pub fn compile<M: Module>(&self, ex: &mut Expression<M>) -> Result<(), Error> {
@@ -53,9 +57,16 @@ pub trait Compiler<M: Module> {
     fn compile(&self, ast: &Ast, ex: &mut Expression<M>) -> Result<OP, Error>;
 }
 
+pub struct Resolver<'e, 'm, M: Module, CTX: Context> {
+    expr: &'e Expression<'m, M>,
+    start: usize,
+    locals_buf: Buffer<CTX::T>,
+    ctx: CTX,
+}
 /// `Expression` is where `compile()` results are stored.
 pub struct Expression<'m, M: Module> {
     module: &'m M,
+    locals: IndexMap<String, ARG>,
     pub(crate) ops: Vec<OP>,
 }
 
@@ -63,6 +74,7 @@ impl<'m, M: Module> Expression<'m, M> {
     pub fn new(module: &'m M) -> Self {
         Self {
             module,
+            locals: IndexMap::with_capacity(2),
             ops: Vec::new(),
         }
     }
@@ -71,41 +83,97 @@ impl<'m, M: Module> Expression<'m, M> {
     pub fn compile(&mut self, ast: &Ast) -> Result<(), Error> {
         self.ops.clear();
 
-        let ex = ast.exprs.last().unwrap();
-        let op = ex.compile(ast, self)?;
+        let mut offset = 0;
+        let mut stores = Vec::with_capacity(2);
+        if let Some(Statement::Return(last_ex)) = ast.stmts.last() {
+            for stmt in &ast.stmts {
+                match stmt {
+                    Statement::OpAssign(name, aop, ex) => match aop {
+                        Assign => {
+                            let op = ex.compile(ast, self)?;
+                            let arg = op.into_arg(self);
+                            match arg {
+                                F(F::I(i)) => match self.locals.entry(name.into()) {
+                                    Entry::Vacant(e) => {
+                                        e.insert(F(F::VAR(LOCAL(offset))));
+                                        stores.push(FOP(FOP::STORE(offset, i)));
+                                        offset += 1;
+                                    }
+                                    Entry::Occupied(mut e) => {
+                                        if let F(F::VAR(LOCAL(offset))) = e.get() {
+                                            stores.push(FOP(FOP::STORE(*offset, i)));
+                                        } else {
+                                            *e.get_mut() = F(F::VAR(LOCAL(offset)));
+                                            stores.push(FOP(FOP::STORE(offset, i)));
+                                            offset += 1;
+                                        }
+                                    }
+                                },
+                                F2(F2::I(i)) => match self.locals.entry(name.into()) {
+                                    Entry::Vacant(e) => {
+                                        e.insert(F2(F2::VAR(LOCAL(offset))));
+                                        stores.push(FOP2(FOP2::STORE(offset, i)));
+                                        offset += 2;
+                                    }
+                                    Entry::Occupied(mut e) => {
+                                        if let F2(F2::VAR(LOCAL(offset))) = e.get() {
+                                            stores.push(FOP2(FOP2::STORE(*offset, i)));
+                                        } else {
+                                            *e.get_mut() = F2(F2::VAR(LOCAL(offset)));
+                                            stores.push(FOP2(FOP2::STORE(offset, i)));
+                                            offset += 2;
+                                        }
+                                    }
+                                },
+                                F3(F3::I(i)) => match self.locals.entry(name.into()) {
+                                    Entry::Vacant(e) => {
+                                        e.insert(F3(F3::VAR(LOCAL(offset))));
+                                        stores.push(FOP3(FOP3::STORE(offset, i)));
+                                        offset += 3;
+                                    }
+                                    Entry::Occupied(mut e) => {
+                                        if let F3(F3::VAR(LOCAL(offset))) = e.get() {
+                                            stores.push(FOP3(FOP3::STORE(*offset, i)));
+                                        } else {
+                                            *e.get_mut() = F3(F3::VAR(LOCAL(offset)));
+                                            stores.push(FOP3(FOP3::STORE(offset, i)));
+                                            offset += 3;
+                                        }
+                                    }
+                                },
+                                B(B::I(i)) => match self.locals.entry(name.into()) {
+                                    Entry::Vacant(e) => {
+                                        e.insert(B(B::VAR(LOCAL(offset))));
+                                        stores.push(BOP(BOP::STORE(offset, i)));
+                                        offset += 1;
+                                    }
+                                    Entry::Occupied(mut e) => {
+                                        if let B(B::VAR(LOCAL(offset))) = e.get() {
+                                            stores.push(BOP(BOP::STORE(*offset, i)));
+                                        } else {
+                                            *e.get_mut() = B(B::VAR(LOCAL(offset)));
+                                            stores.push(BOP(BOP::STORE(offset, i)));
+                                            offset += 1;
+                                        }
+                                    }
+                                },
+                                _ => {
+                                    self.locals.insert(name.into(), arg);
+                                }
+                            }
+                        }
+                        _ => unimplemented!(),
+                    },
+                    _ => {} // Statement::Return(e) => e.compile(ast, self),
+                }
+            }
 
-        self.ops.push(op);
-        if self.ops.len() <= 2 {
+            let op = last_ex.compile(ast, self)?;
+            self.ops.push(op);
+            self.ops.append(&mut stores);
             Ok(())
         } else {
-            // *********************************************
-            // **********   optimization pass   ************
-            // *********************************************
-            // let index_set = IndexSet::with_capacity(self.ops.len());
-            // let mut cache: IndexSet<OP> = index_set;
-            // let mut index_remap: Vec<usize> = Vec::with_capacity(self.ops.len());
-
-            // let mut iter_instr = self.ops.iter();
-            // cache.insert(iter_instr.next().unwrap().clone());
-            // index_remap.push(0);
-
-            // for op in iter_instr {
-            //     let mut op = op.clone();
-            //     op.update_i(|i| *index_remap.get(i).unwrap());
-
-            //     if let Some(i) = cache.get_index_of(&op) {
-            //         index_remap.push(i);
-            //     } else {
-            //         cache.insert(op);
-            //         index_remap.push(cache.len() - 1);
-            //     }
-            // }
-            // let new_len = cache.len();
-            // for (old, new) in self.ops.iter_mut().zip(cache.into_iter()) {
-            //     *old = new;
-            // }
-            // self.ops.truncate(new_len);
-            Ok(())
+            Err(Error::InvalidType("Nothing returned".into()))
         }
     }
 
@@ -143,6 +211,7 @@ impl<'m, M: Module> Expression<'m, M> {
     #[inline]
     pub fn clear(&mut self) {
         self.ops.clear();
+        self.locals.clear();
     }
 }
 
@@ -207,7 +276,7 @@ impl<M: Module> IntoArg<M, F> for FOP {
     fn into_arg(self, ex: &mut Expression<M>) -> F {
         match self {
             FOP::CONST(c) => F::CONST(c),
-            FOP::VAR(i) => F::VAR(i),
+            FOP::VAR(v) => F::VAR(v),
             _ => F::I(ex.push(FOP(self))),
         }
     }
@@ -218,7 +287,7 @@ impl<M: Module> IntoArg<M, B> for FOP {
     fn into_arg(self, ex: &mut Expression<M>) -> B {
         match self {
             FOP::CONST(c) => B::CONST((c != 0.0).into()),
-            FOP::VAR(i) => B::VAR(i),
+            FOP::VAR(v) => B::VAR(v),
             _ => B::I(ex.push(FOP(self))),
         }
     }
@@ -249,7 +318,7 @@ impl<M: Module> IntoArg<M, F2> for FOP2 {
     fn into_arg(self, ex: &mut Expression<M>) -> F2 {
         match self {
             FOP2::CONST(c) => F2::CONST(c),
-            FOP2::VAR(i) => F2::VAR(i),
+            FOP2::VAR(v) => F2::VAR(v),
             _ => F2::I(ex.push(FOP2(self))),
         }
     }
@@ -260,7 +329,7 @@ impl<M: Module> IntoArg<M, F3> for FOP3 {
     fn into_arg(self, ex: &mut Expression<M>) -> F3 {
         match self {
             FOP3::CONST(c) => F3::CONST(c),
-            FOP3::VAR(i) => F3::VAR(i),
+            FOP3::VAR(v) => F3::VAR(v),
             _ => F3::I(ex.push(FOP3(self))),
         }
     }
@@ -268,6 +337,7 @@ impl<M: Module> IntoArg<M, F3> for FOP3 {
 
 impl<M: Module> Debug for Expression<'_, M> {
     fn fmt(&self, f: &mut fmt::Formatter) -> Result<(), fmt::Error> {
+        writeln!(f, "{:?}", self.locals)?;
         debug_indexed_list(f, &self.ops)?;
         Ok(())
     }
@@ -612,10 +682,10 @@ impl<M: Module> Expression<'_, M> {
 }
 
 #[derive(Debug)]
-struct ExprSlice<'s>(&'s tokens::Value, Vec<&'s ExprPair>);
+struct ExprSlice<'s>(&'s Value, Vec<&'s ExprPair>);
 
 impl<'s> ExprSlice<'s> {
-    fn new(first: &tokens::Value) -> ExprSlice<'_> {
+    fn new(first: &Value) -> ExprSlice<'_> {
         ExprSlice(first, Vec::with_capacity(8))
     }
 
@@ -822,6 +892,7 @@ impl<M: Module> Compiler<M> for ExprSlice<'_> {
             Add => {
                 let mut xss = Vec::<ExprSlice>::with_capacity(4);
                 self.split(Add, &mut xss);
+                println!("ADD SPLITTED: {:?}", xss);
                 let mut ops = Vec::<OP>::with_capacity(xss.len());
                 for xs in xss {
                     let op = xs.compile(ast, ex)?;
@@ -848,6 +919,7 @@ impl<M: Module> Compiler<M> for ExprSlice<'_> {
             Mul => {
                 let mut xss = Vec::<ExprSlice>::with_capacity(4);
                 self.split(Mul, &mut xss);
+                println!("MUL SPLITTED: {:?}", xss);
                 let mut ops = Vec::<OP>::with_capacity(xss.len());
                 for xs in xss {
                     let op = xs.compile(ast, ex)?;
@@ -939,7 +1011,9 @@ impl<M: Module> Compiler<M> for ECV {
         match self {
             Const(c) => Ok(FOP(FOP::CONST(*c))),
             Var(name) => {
-                if let Some(op) = ex.module.dispatch_ident(name) {
+                if let Some(arg) = ex.locals.get(name) {
+                    Ok(arg.clone().into())
+                } else if let Some(op) = ex.module.dispatch_ident(name) {
                     Ok(op)
                 } else {
                     builtins::dispatch_const(name).ok_or(Error::Undefined(name.to_owned()))
@@ -950,7 +1024,7 @@ impl<M: Module> Compiler<M> for ECV {
     }
 }
 
-impl<M: Module> Compiler<M> for tokens::Value {
+impl<M: Module> Compiler<M> for Value {
     fn compile(&self, ast: &Ast, ex: &mut Expression<M>) -> Result<OP, Error> {
         match self {
             ECV(ecv) => ecv.compile(ast, ex),
@@ -965,23 +1039,23 @@ impl<M: Module> Compiler<M> for tokens::Value {
                     match (cond, then, els) {
                         (B::CONST(false), _, els) => Ok(els),
                         (B::CONST(_), then, _) => Ok(then),
-                        (cond, then, els) => match (&then).max(&els) {
-                            BOP(_) => Ok(BOP(BOP::IF(
+                        (cond, then, els) => match then.optype().max(els.optype()) {
+                            Type::B => Ok(BOP(BOP::IF(
                                 cond,
                                 then.into_arg(ex).try_into().unwrap(),
                                 els.into_arg(ex).try_into().unwrap(),
                             ))),
-                            FOP(_) => Ok(FOP(FOP::IF(
+                            Type::F => Ok(FOP(FOP::IF(
                                 cond,
                                 then.into_arg(ex).try_into().unwrap(),
                                 els.into_arg(ex).try_into().unwrap(),
                             ))),
-                            FOP2(_) => Ok(FOP2(FOP2::IF(
+                            Type::F2 => Ok(FOP2(FOP2::IF(
                                 cond,
                                 then.into_arg(ex).try_into().unwrap(),
                                 els.into_arg(ex).try_into().unwrap(),
                             ))),
-                            FOP3(_) => Ok(FOP3(FOP3::IF(
+                            Type::F3 => Ok(FOP3(FOP3::IF(
                                 cond,
                                 then.into_arg(ex).try_into()?,
                                 els.into_arg(ex).try_into()?,

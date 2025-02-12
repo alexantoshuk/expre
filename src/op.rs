@@ -5,39 +5,62 @@ use gxhash::GxHasher;
 use std::cmp::Ordering;
 use std::fmt::{self, Debug};
 use std::hash::{Hash, Hasher};
-impl From<f64> for F {
-    fn from(value: f64) -> Self {
-        Self::CONST(value)
+
+#[derive(Debug, Copy, Clone, PartialEq, Eq, PartialOrd, Ord)]
+pub enum Type {
+    B = 0,
+    F = 1,
+    F2 = 2,
+    F3 = 3,
+}
+
+#[derive(Debug, Copy, Clone)]
+pub enum Adress {
+    F(usize),
+    F2(usize),
+    F3(usize),
+}
+
+impl From<Adress> for OP {
+    #[inline]
+    fn from(value: Adress) -> Self {
+        match value {
+            Adress::F(i) => FOP(FOP::VAR(LOCAL(i))),
+            Adress::F2(i) => FOP2(FOP2::VAR(LOCAL(i))),
+            Adress::F3(i) => FOP3(FOP3::VAR(LOCAL(i))),
+        }
     }
 }
 
-#[derive(Debug, Clone, PartialEq, Eq)]
+#[derive(Debug, Clone)]
 pub enum ARG {
     F(F),
     F2(F2),
     F3(F3),
     B(B),
 }
+
 impl ARG {
     #[inline]
-    pub fn name(&self) -> &'static str {
+    pub fn optype(&self) -> Type {
         match self {
-            Self::B(_) => "B",
-            Self::F(_) => "F",
-            Self::F2(_) => "F2",
-            Self::F3(_) => "F3",
+            Self::B(_) => Type::B,
+            Self::F(_) => Type::F,
+            Self::F2(_) => Type::F2,
+            Self::F3(_) => Type::F3,
         }
     }
 
     #[inline]
-    fn order(&self) -> u32 {
+    pub fn name(&self) -> &'static str {
         match self {
-            Self::B(_) => 1,
-            Self::F(_) => 2,
-            Self::F2(_) => 3,
-            Self::F3(_) => 4,
+            Self::F(_) => "F",
+            Self::F2(_) => "F2",
+            Self::F3(_) => "F3",
+            Self::B(_) => "B",
         }
     }
+
     #[inline]
     pub(crate) fn convert_bool(self) -> Self {
         match self {
@@ -46,36 +69,24 @@ impl ARG {
         }
     }
 }
-impl Ord for ARG {
-    #[inline]
-    fn cmp(&self, other: &Self) -> std::cmp::Ordering {
-        self.order().cmp(&other.order())
-    }
-}
-
-impl PartialOrd for ARG {
-    #[inline]
-    fn partial_cmp(&self, other: &Self) -> Option<Ordering> {
-        Some(self.cmp(other))
-    }
-}
-
-impl Ord for OP {
-    #[inline]
-    fn cmp(&self, other: &Self) -> std::cmp::Ordering {
-        self.order().cmp(&other.order())
-    }
-}
-
-impl PartialOrd for OP {
-    #[inline]
-    fn partial_cmp(&self, other: &Self) -> Option<Ordering> {
-        Some(self.cmp(other))
-    }
-}
 
 pub(crate) use crate::op::ARG::*;
 
+impl From<ARG> for OP {
+    fn from(value: ARG) -> Self {
+        match value {
+            F(F::CONST(c)) => FOP(FOP::CONST(c)),
+            F(F::VAR(v)) => FOP(FOP::VAR(v)),
+            F2(F2::CONST(c)) => FOP2(FOP2::CONST(c)),
+            F2(F2::VAR(v)) => FOP2(FOP2::VAR(v)),
+            F3(F3::CONST(c)) => FOP3(FOP3::CONST(c)),
+            F3(F3::VAR(v)) => FOP3(FOP3::VAR(v)),
+            B(B::CONST(c)) => BOP(BOP::CONST(c)),
+            B(B::VAR(v)) => FOP(FOP::VAR(v)),
+            _ => unreachable!(),
+        }
+    }
+}
 impl TryFrom<ARG> for F {
     type Error = Error;
     #[inline]
@@ -137,11 +148,18 @@ impl From<F> for ARG {
     }
 }
 
-#[derive(Clone, Copy, Hash, PartialEq, Eq)]
+#[derive(Clone, Copy, Hash, PartialEq, Eq, Debug)]
+pub enum VAR {
+    LOCAL(usize),
+    GLOBAL(usize),
+}
+pub(crate) use crate::op::VAR::*;
+
+#[derive(Clone, Copy)]
 pub enum B {
     I(usize),
     CONST(bool),
-    VAR(usize),
+    VAR(VAR),
 }
 
 impl Default for B {
@@ -174,12 +192,18 @@ impl Debug for B {
 pub enum F {
     I(usize),
     CONST(f64),
-    VAR(usize),
+    VAR(VAR),
 }
 
 impl Default for F {
     fn default() -> Self {
         Self::CONST(0.0)
+    }
+}
+
+impl From<f64> for F {
+    fn from(value: f64) -> Self {
+        Self::CONST(value)
     }
 }
 
@@ -203,41 +227,7 @@ impl Debug for F {
     }
 }
 
-impl Hash for F {
-    #[inline]
-    fn hash<H: Hasher>(&self, state: &mut H) {
-        match self {
-            Self::I(u) => {
-                state.write_u8(1);
-                state.write_usize(*u);
-            }
-            Self::CONST(c) => {
-                state.write_u8(2);
-                state.write_u64(c.to_bits());
-            }
-            Self::VAR(u) => {
-                state.write_u8(3);
-                state.write_usize(*u);
-            }
-        }
-    }
-}
-
-impl PartialEq for F {
-    #[inline]
-    fn eq(&self, other: &Self) -> bool {
-        match (self, other) {
-            (Self::I(s), Self::I(o)) => s == o,
-            (Self::CONST(s), Self::CONST(o)) => s.to_bits() == o.to_bits(),
-            (Self::VAR(s), Self::VAR(o)) => s == o,
-            _ => false,
-        }
-    }
-}
-
-impl Eq for F {}
-
-#[derive(Debug, Clone, PartialEq, Eq, Hash)]
+#[derive(Debug, Clone)]
 pub enum OP {
     BOP(BOP),
     FOP(FOP),
@@ -255,12 +245,12 @@ impl Default for OP {
 
 impl OP {
     #[inline]
-    fn order(&self) -> u32 {
+    pub fn optype(&self) -> Type {
         match self {
-            Self::BOP(_) => 1,
-            Self::FOP(_) => 2,
-            Self::FOP2(_) => 3,
-            Self::FOP3(_) => 4,
+            Self::BOP(_) => Type::B,
+            Self::FOP(_) => Type::F,
+            Self::FOP2(_) => Type::F2,
+            Self::FOP3(_) => Type::F3,
         }
     }
 
@@ -299,11 +289,11 @@ impl OP {
 /// OPS that return bool type aka BOP
 ///////////////////////////////////////////////////////////////////////////////////////////////////////////////////
 
-#[derive(Debug, Clone, Hash, PartialEq, Eq)]
+#[derive(Debug, Clone)]
 pub enum BOP {
     //---- Primitive Value Types:
     CONST(bool),
-
+    STORE(usize, usize),
     //---- Unary Ops:
     NOT(B),
 
@@ -342,7 +332,8 @@ impl Default for BOP {
 pub enum FOP {
     //---- Primitive Value Types:
     CONST(f64),
-    VAR(usize),
+    VAR(VAR),
+    STORE(usize, usize),
 
     // F2COMP(F2, F),
     // F3COMP(F3, F),
@@ -370,84 +361,6 @@ impl Default for FOP {
     }
 }
 
-impl PartialEq for FOP {
-    #[inline]
-    fn eq(&self, other: &Self) -> bool {
-        match (self, other) {
-            (Self::CONST(s), Self::CONST(o)) => s.to_bits() == o.to_bits(),
-            (Self::VAR(s), Self::VAR(o)) => s == o,
-            // (Self::FROM_B(s), Self::FROM_B(o)) => s == o,
-            (Self::ADD(s0, s1), Self::ADD(o0, o1)) => (s0, s1) == (o0, o1) || (s0, s1) == (o1, o0),
-            (Self::MUL(s0, s1), Self::MUL(o0, o1)) => (s0, s1) == (o0, o1) || (s0, s1) == (o1, o0),
-            (Self::NEG(s), Self::NEG(o)) => s == o,
-            (Self::INV(s), Self::INV(o)) => s == o,
-            (Self::REM(s0, s1), Self::REM(o0, o1)) => (s0, s1) == (o0, o1),
-
-            (Self::IF(s0, s1, s2), Self::IF(o0, o1, o2)) => (s0, s1, s2) == (o0, o1, o2),
-            (Self::STDFN(s), Self::STDFN(o)) => s == o,
-            _ => false,
-        }
-    }
-}
-
-impl Eq for FOP {}
-
-impl Hash for FOP {
-    #[inline]
-    fn hash<H: Hasher>(&self, state: &mut H) {
-        match self {
-            Self::CONST(c) => {
-                state.write_u8(1);
-                state.write_u64(c.to_bits());
-            }
-            Self::VAR(u) => {
-                state.write_u8(2);
-                state.write_usize(*u);
-            }
-            // Self::FROM_B(b) => {
-            //     state.write_u8(3);
-            //     b.hash(state);
-            // }
-            Self::NEG(a) => {
-                state.write_u8(4);
-                a.hash(state);
-            }
-            Self::INV(a) => {
-                state.write_u8(6);
-                a.hash(state);
-            }
-            Self::ADD(a0, a1) => {
-                state.write_u8(7);
-                state.write_u64(_hash(a0) ^ _hash(a1));
-            }
-            Self::MUL(a0, a1) => {
-                state.write_u8(8);
-                state.write_u64(_hash(a0) ^ _hash(a1));
-            }
-            Self::REM(a0, a1) => {
-                state.write_u8(9);
-                a0.hash(state);
-                a1.hash(state);
-            }
-            Self::POW(a0, a1) => {
-                state.write_u8(10);
-                a0.hash(state);
-                a1.hash(state);
-            }
-            Self::IF(b, a0, a1) => {
-                state.write_u8(12);
-                b.hash(state);
-                a0.hash(state);
-                a1.hash(state);
-            }
-            Self::STDFN(ffn) => {
-                state.write_u8(21);
-                ffn.hash(state);
-            }
-        }
-    }
-}
-
 ///////////////////////////////////////////////////////////////////////////////////////////////////////////////////
 /// OPS that return [T;2] type aka FOP2
 ///////////////////////////////////////////////////////////////////////////////////////////////////////////////////
@@ -458,7 +371,7 @@ macro_rules! make_array_FOP {
         pub enum $ARG {
             I(usize),
             CONST([f64; $N]),
-            VAR(usize),
+            VAR(VAR),
             F(F),
         }
 
@@ -536,59 +449,19 @@ macro_rules! make_array_FOP {
                 match self {
                     Self::I(i) => write!(f, "@{}", i),
                     Self::CONST(c) => write!(f, "CONST({:?})", c),
-                    Self::VAR(i) => write!(f, "VAR({:?})", i),
+                    Self::VAR(v) => write!(f, "VAR({:?})", v),
                     Self::F(f_) => write!(f, "{:?}", f_),
                 }
             }
         }
 
-        impl Hash for $ARG {
-            #[inline]
-            fn hash<H: Hasher>(&self, state: &mut H) {
-                match self {
-                    Self::I(u) => {
-                        state.write_u8(1);
-                        state.write_usize(*u);
-                    }
-                    Self::CONST(c) => {
-                        state.write_u8(2);
-                        for i in c {
-                            state.write_u64(i.to_bits());
-                        }
-                    }
-                    Self::VAR(u) => {
-                        state.write_u8(3);
-                        state.write_usize(*u);
-                    }
-                    Self::F(f) => {
-                        state.write_u8(4);
-                        f.hash(state);
-                    }
-                }
-            }
-        }
-
-        impl PartialEq for $ARG {
-            #[inline]
-            fn eq(&self, other: &Self) -> bool {
-                match (self, other) {
-                    (Self::I(s), Self::I(o)) => s == o,
-                    (Self::CONST(s), Self::CONST(o)) => as_bytes(s) == as_bytes(o),
-                    (Self::VAR(s), Self::VAR(o)) => s == o,
-                    (Self::F(s), Self::F(o)) => s == o,
-                    _ => false,
-                }
-            }
-        }
-
-        impl Eq for $ARG {}
-
         #[derive(Debug, Clone)]
         pub enum $OP {
             //---- Primitive Value Types:
             CONST([f64; $N]),
-            VAR(usize),
+            VAR(VAR),
             NEW([F; $N]),
+            STORE(usize, usize),
 
             //---- Unary Ops:
             NEG($ARG),
@@ -611,102 +484,6 @@ macro_rules! make_array_FOP {
         impl Default for $OP {
             fn default() -> Self {
                 Self::CONST([0.0; $N])
-            }
-        }
-
-        impl PartialEq for $OP {
-            #[inline]
-            fn eq(&self, other: &Self) -> bool {
-                match (self, other) {
-                    (Self::CONST(s), Self::CONST(o)) => as_bytes(s) == as_bytes(o),
-                    (Self::VAR(s), Self::VAR(o)) => s == o,
-                    // (Self::FROM_F(s), Self::FROM_F(o)) => s == o,
-                    // (Self::FROM_B(s), Self::FROM_B(o)) => s == o,
-                    (Self::NEW(s), Self::NEW(o)) => s == o,
-
-                    (Self::ADD(s0, s1), Self::ADD(o0, o1)) => {
-                        (s0, s1) == (o0, o1) || (s0, s1) == (o1, o0)
-                    }
-                    (Self::MUL(s0, s1), Self::MUL(o0, o1)) => {
-                        (s0, s1) == (o0, o1) || (s0, s1) == (o1, o0)
-                    }
-                    (Self::NEG(s), Self::NEG(o)) => s == o,
-
-                    (Self::INV(s), Self::INV(o)) => s == o,
-                    (Self::REM(s0, s1), Self::REM(o0, o1)) => (s0, s1) == (o0, o1),
-                    (Self::POW(s0, s1), Self::POW(o0, o1)) => (s0, s1) == (o0, o1),
-
-                    (Self::IF(s0, s1, s2), Self::IF(o0, o1, o2)) => (s0, s1, s2) == (o0, o1, o2),
-                    (Self::STDFN(s), Self::STDFN(o)) => s == o,
-                    _ => false,
-                }
-            }
-        }
-        impl Eq for $OP {}
-
-        impl Hash for $OP {
-            #[inline]
-            fn hash<H: Hasher>(&self, state: &mut H) {
-                match self {
-                    Self::CONST(c) => {
-                        state.write_u8(1);
-                        for i in c {
-                            state.write_u64(i.to_bits());
-                        }
-                    }
-                    Self::VAR(u) => {
-                        state.write_u8(2);
-                        state.write_usize(*u);
-                    }
-                    // Self::FROM_F(f) => {
-                    //     state.write_u8(3);
-                    //     f.hash(state);
-                    // }
-                    // Self::FROM_B(b) => {
-                    //     state.write_u8(4);
-                    //     b.hash(state);
-                    // }
-                    Self::NEW(a) => {
-                        state.write_u8(5);
-                        a.hash(state);
-                    }
-                    Self::NEG(a) => {
-                        state.write_u8(6);
-                        a.hash(state);
-                    }
-                    Self::INV(a) => {
-                        state.write_u8(7);
-                        a.hash(state);
-                    }
-                    Self::ADD(a0, a1) => {
-                        state.write_u8(8);
-                        state.write_u64(_hash(a0) ^ _hash(a1));
-                    }
-                    Self::MUL(a0, a1) => {
-                        state.write_u8(9);
-                        state.write_u64(_hash(a0) ^ _hash(a1));
-                    }
-                    Self::REM(a0, a1) => {
-                        state.write_u8(10);
-                        a0.hash(state);
-                        a1.hash(state);
-                    }
-                    Self::POW(a0, a1) => {
-                        state.write_u8(11);
-                        a0.hash(state);
-                        a1.hash(state);
-                    }
-                    Self::IF(b, a0, a1) => {
-                        state.write_u8(12);
-                        b.hash(state);
-                        a0.hash(state);
-                        a1.hash(state);
-                    }
-                    Self::STDFN(f) => {
-                        state.write_u8(13);
-                        f.hash(state);
-                    }
-                }
             }
         }
     };

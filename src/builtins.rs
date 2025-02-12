@@ -4,33 +4,6 @@ use crate::evaler::*;
 use crate::float::*;
 use crate::op::*;
 use crate::{compile_stdfn, map2, map3};
-use indexmap::IndexMap;
-
-#[derive(Clone, Debug)]
-pub struct Builtins {
-    pub vars: IndexMap<String, ARG>,
-}
-
-impl Module for Builtins {
-    #[inline]
-    fn dispatch_ident(&self, name: &str) -> Option<OP> {
-        match self.vars.get(name)? {
-            F(F::CONST(c)) => Some(FOP(FOP::CONST(*c))),
-            F(F::VAR(i)) => Some(FOP(FOP::VAR(*i))),
-
-            F2(F2::CONST(c)) => Some(FOP2(FOP2::CONST(*c))),
-            F2(F2::VAR(i)) => Some(FOP2(FOP2::VAR(*i))),
-
-            F3(F3::CONST(c)) => Some(FOP3(FOP3::CONST(*c))),
-            F3(F3::VAR(i)) => Some(FOP3(FOP3::VAR(*i))),
-
-            B(B::CONST(c)) => Some(BOP(BOP::CONST(*c))),
-            B(B::VAR(i)) => Some(FOP(FOP::VAR(*i))),
-
-            _ => None,
-        }
-    }
-}
 
 #[inline]
 pub(crate) fn dispatch_const(name: &str) -> Option<OP> {
@@ -54,19 +27,19 @@ macro_rules! impl_std_fn {
         }
         paste!{
             #[allow(non_camel_case_types)]
-            #[derive(PartialEq, Eq, Hash, Clone, Debug)]
+            #[derive(Clone, Debug)]
             pub enum STDFN {
                 $([<$fname:upper>]($(_type!($arg, F)),*)),*
             }
 
             #[allow(non_camel_case_types)]
-            #[derive(Eq, PartialEq, Hash, Clone, Debug)]
+            #[derive(Clone, Debug)]
             pub enum STDFN2 {
                 $([<$fname:upper>]($(_type!($arg, F2)),*)),*
             }
 
             #[allow(non_camel_case_types)]
-            #[derive(Eq, PartialEq, Hash, Clone, Debug)]
+            #[derive(Clone, Debug)]
             pub enum STDFN3 {
                 $([<$fname:upper>]($(_type!($arg, F3)),*)),*
             }

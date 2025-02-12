@@ -122,28 +122,27 @@ macro_rules! max {
 pub(crate) use max;
 
 macro_rules! compile_op {
-    ($ename:ident, $fname:ident, ($($a:ident),+ ))=> {
-        match crate::max!($($a),+) {
-            F(_) | B(_) => {
+    ($ename:ident, $fname:ident, ($($a:ident),+ )) => {
+        #[allow(unused_parens)]
+        match crate::max!($($a.optype()),+) {
+            Type::F | Type::B => {
                 match ($($a.try_into().unwrap()),+) {
                     ($(F::CONST($a)),+) => FOP(FOP::CONST(f64::$fname($($a),+))),
                     ($($a),+) => FOP(FOP::$ename($($a),+)),
                 }
             }
-            F2(_) => {
+            Type::F2 => {
                 match ($($a.try_into().unwrap()),+) {
                     ($(F2::CONST($a)),+) => FOP2(FOP2::CONST(map2!(f64::$fname, $($a),+))),
                     ($($a),+) => FOP2(FOP2::$ename($($a),+)),
                 }
             }
-            F3(_) => {
+            Type::F3=> {
                 match ($($a.try_into()?),+) {
                     ($(F3::CONST($a)),+) => FOP3(FOP3::CONST(map3!(f64::$fname, $($a),+))),
                     ($($a),+) => FOP3(FOP3::$ename($($a),+)),
                 }
             }
-
-            _ => return Err(Error::Undefined("".into()))
         }
     };
 }
@@ -151,28 +150,27 @@ macro_rules! compile_op {
 pub(crate) use compile_op;
 
 macro_rules! compile_stdfn {
-    ($ename:ident, $fname:ident, ($($a:ident),+ ))=> {
-        match crate::max!($($a),+) {
-            F(_) | B(_) => {
+    ($ename:ident, $fname:ident, ($($a:ident),+ )) => {
+        #[allow(unused_parens)]
+        match crate::max!($($a.optype()),+) {
+            Type::F | Type::B => {
                 match ($($a.try_into().ok()?),+) {
                     ($(F::CONST($a)),+) => FOP(FOP::CONST(f64::$fname($($a),+))),
                     ($($a),+) => FOP(FOP::STDFN(STDFN::$ename($($a),+))),
                 }
             }
-            F2(_) => {
+            Type::F2 => {
                 match ($($a.try_into().ok()?),+) {
                     ($(F2::CONST($a)),+) => FOP2(FOP2::CONST(map2!(f64::$fname, $($a),+))),
                     ($($a),+) => FOP2(FOP2::STDFN(STDFN2::$ename($($a),+))),
                 }
             }
-            F3(_) => {
+            Type::F3=> {
                 match ($($a.try_into().ok()?),+) {
                     ($(F3::CONST($a)),+) => FOP3(FOP3::CONST(map3!(f64::$fname, $($a),+))),
                     ($($a),+) => FOP3(FOP3::STDFN(STDFN3::$ename($($a),+))),
                 }
             }
-
-            _ => return None
         }
     };
 }

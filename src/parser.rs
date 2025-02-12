@@ -10,24 +10,24 @@ pub const DEFAULT_EXPR_DEPTH_LIMIT: usize = 32;
 
 /// Use this function to parse an expression String. The `Ast` will be cleared first.
 #[inline]
-pub fn parse<S: AsRef<str>>(expr_str: S, ast: &mut Ast) -> Result<(), Error> {
+pub fn parse<S: AsRef<str>>(expr_str: S, ast: &mut Ast) -> Result<usize, Error> {
     ast.parse(expr_str)
 }
 
 pub trait ParseExpr {
-    fn parse_expr(&self, ast: &mut Ast) -> Result<(), Error>;
+    fn parse_expr(&self, ast: &mut Ast) -> Result<usize, Error>;
 }
 
 impl<S: AsRef<str>> ParseExpr for S {
     #[inline]
-    fn parse_expr(&self, ast: &mut Ast) -> Result<(), Error> {
+    fn parse_expr(&self, ast: &mut Ast) -> Result<usize, Error> {
         ast.parse(self)
     }
 }
 
 pub struct Ast {
+    pub(crate) stmts: Vec<Statement>,
     pub(crate) exprs: Vec<Expr>,
-    local_vars: BTreeMap<String, ECV>,
 }
 
 impl Ast {
@@ -41,8 +41,8 @@ impl Ast {
     #[inline]
     pub fn with_capacity(cap: usize) -> Self {
         Self {
+            stmts: Vec::with_capacity(2),
             exprs: Vec::with_capacity(cap),
-            local_vars: BTreeMap::new(),
         }
     }
 
@@ -54,54 +54,64 @@ impl Ast {
 
     /// Use this function to parse an expression String. The `Ast` will be cleared first.
     #[inline]
-    pub fn parse<S: AsRef<str>>(&mut self, expr_str: S) -> Result<(), Error> {
+    pub fn parse<S: AsRef<str>>(&mut self, expr_str: S) -> Result<usize, Error> {
         let expr_str = expr_str.as_ref();
         self.clear();
         if expr_str.len() > DEFAULT_EXPR_LEN_LIMIT {
             return Err(Error::TooLong);
-        } // Restrict length for safety
+        }
         let mut bs = expr_str.as_bytes();
         loop {
-            self.read_expr(&mut bs, 0, true).map(|_| ())?;
+            let stmt = self.read_stmt(&mut bs)?;
+            self.push_stmt(stmt);
             if bs.is_empty() {
                 break;
             }
             skip(&mut bs);
         }
-        Ok(())
+        Ok(0)
     }
 
     /// Clears all data from [`Ast`](struct.ParseAST.html) and [`Ast`](struct.CompileAST.html).
     #[inline]
     pub fn clear(&mut self) {
+        self.stmts.clear();
         self.exprs.clear();
-        self.local_vars.clear();
     }
 
     /// Returns a reference to the [`Expr`](../parser/struct.Expr.html)
     /// located at `expr_i` within the `Ast.exprs'.
     ///
     #[inline]
-    pub fn get_expr(&self, expr_i: usize) -> &Expr {
+    pub fn get_stmt(&self, index: usize) -> &Statement {
         // F'm using this non-panic match structure to boost performance:
-        self.exprs.get(expr_i).unwrap()
+        self.stmts.get(index).unwrap()
     }
 
-    #[inline]
-    pub fn last(&self) -> Option<&Expr> {
-        self.exprs.last()
-    }
-
-    /// Returns a reference to the [`Value`](../parser/enum.Value.html)
-    /// located at `val_i` within the `Ast.vals'.
+    /// Returns a reference to the [`Expr`](../parser/struct.Expr.html)
+    /// located at `expr_i` within the `Ast.exprs'.
     ///
     #[inline]
-    pub fn get_val(&self, val_i: usize) -> &Value {
-        &self.exprs.get(val_i).unwrap().0
+    pub fn get_expr(&self, index: usize) -> &Expr {
+        // F'm using this non-panic match structure to boost performance:
+        self.exprs.get(index).unwrap()
     }
+
+    // #[inline]
+    // pub fn last(&self) -> Option<&Node> {
+    //     self.nodes.last()
+    // }
 
     /// Appends an `Expr` to `Ast.0`.
     ///
+    #[inline]
+    pub fn push_stmt(&mut self, stmt: Statement) -> usize {
+        let i = self.stmts.len();
+
+        self.stmts.push(stmt);
+        i
+    }
+
     #[inline]
     pub fn push_expr(&mut self, expr: Expr) -> usize {
         let i = self.exprs.len();
@@ -113,18 +123,22 @@ impl Ast {
     #[inline]
     pub fn push_val(&mut self, val: Value) -> usize {
         let i = self.exprs.len();
-        self.exprs.push(Expr(val, vec![]));
+        self.exprs.push(Expr(val, Vec::new()));
         i
     }
 }
 
 impl Debug for Ast {
     fn fmt(&self, f: &mut fmt::Formatter) -> Result<(), fmt::Error> {
+        write!(f, "{:?}", self.stmts)?;
         write!(f, "{:?}", self.exprs)
     }
 }
 impl Display for Ast {
     fn fmt(&self, f: &mut fmt::Formatter) -> Result<(), fmt::Error> {
+        write!(f, "\nStatements:")?;
+        display_indexed_list(f, &self.stmts)?;
+        write!(f, "\nExpressions:")?;
         display_indexed_list(f, &self.exprs)?;
         Ok(())
     }
@@ -136,97 +150,94 @@ pub(crate) type ExprPair = (BinaryOp, Value);
 ///
 /// It can be `compile()`d or `eval()`d.
 #[derive(PartialEq, Debug)]
-pub(crate) struct Expr(
-    pub Value,
-    pub Vec<ExprPair>, // cap=8
-);
+pub(crate) struct Expr(pub Value, pub Vec<ExprPair>);
+
+#[derive(PartialEq, Debug)]
+pub(crate) enum Statement {
+    OpAssign(String, AssignOp, Expr),
+    Return(Expr),
+}
 
 impl Display for Expr {
     fn fmt(&self, f: &mut fmt::Formatter) -> Result<(), fmt::Error> {
         let Expr(val, pairs) = self;
         if pairs.is_empty() {
-            write!(f, "{val}")
+            write!(f, "{val}");
         } else {
-            write!(f, "{val}")?;
+            write!(f, "{val}");
             for (op, val) in pairs {
-                write!(f, " {op} {val}")?;
+                write!(f, " {op} {val}");
             }
-            Ok(())
         }
+        Ok(())
+    }
+}
+
+impl Display for Statement {
+    fn fmt(&self, f: &mut fmt::Formatter) -> Result<(), fmt::Error> {
+        match self {
+            Self::OpAssign(s, op, e) => {
+                write!(f, "{s} {op} {e}");
+            }
+            Self::Return(e) => {
+                write!(f, "{e}");
+            }
+        }
+        Ok(())
     }
 }
 
 impl Ast {
     #[inline]
-    fn read_expr(&mut self, bs: &mut &[u8], depth: usize, expect_eof: bool) -> Result<ECV, Error> {
+    fn read_stmt(&mut self, bs: &mut &[u8]) -> Result<Statement, Error> {
+        let first = self.read_value(bs, 0)?;
+        let stmt = match read_assignop(bs)? {
+            Some(aop) => match first {
+                ECV(Var(name)) => {
+                    let e = self.read_expr(bs, 0)?;
+                    Statement::OpAssign(name, aop, e)
+                }
+                _ => unimplemented!(),
+            },
+            None => {
+                let pairs = self.read_expr_pairs(bs, 0)?;
+                Statement::Return(Expr(first, pairs))
+            }
+        };
+
+        Ok(stmt)
+
+        // if !bs.is_empty() {
+        //     let bs_str = match from_utf8(bs) {
+        //         Ok(s) => s,
+        //         Err(..) => "Utf8Error while handling UnparsedTokensRemaining error",
+        //     };
+        //     return Err(Error::UnparsedTokensRemaining(bs_str.to_string()));
+        // }
+    }
+
+    #[inline]
+    fn read_expr(&mut self, bs: &mut &[u8], depth: usize) -> Result<Expr, Error> {
         if depth > DEFAULT_EXPR_DEPTH_LIMIT {
             return Err(Error::TooDeep);
         }
 
-        let first = self.read_value(bs, depth)?;
+        let first = self.read_value(bs, 0)?;
+        let pairs = self.read_expr_pairs(bs, 0)?;
+        let e = Expr(first, pairs);
+        Ok(e)
+        //     // if expect_eof && !bs.is_empty() {
+        //     //     let bs_str = match from_utf8(bs) {
+        //     //         Ok(s) => s,
+        //     //         Err(..) => "Utf8Error while handling UnparsedTokensRemaining error",
+        //     //     };
+        //     //     return Err(Error::UnparsedTokensRemaining(bs_str.to_string()));
+        //     // }
 
-        if let AssignOp(varname, aop) = &first {
-            if !expect_eof {
-                return Err(Error::InvalidSyntax(format!(
-                    "{}",
-                    str::from_utf8(bs).unwrap()
-                )));
-            }
-
-            let ecv = self.read_expr(bs, depth, false)?;
-            if aop == &EAssign {
-                self.local_vars.insert(varname.clone(), ecv.clone());
-                return Ok(ecv);
-            }
-
-            let e = if let Some(ecv) = self.local_vars.get(varname) {
-                ECV(ecv.clone())
-            } else {
-                ECV(Var(varname.into()))
-            };
-
-            let i = match aop {
-                EAddAssign => self.push_expr(Expr(e, vec![(Add, Value::ECV(ecv))])),
-                ESubAssign => self.push_expr(Expr(e, vec![(Sub, Value::ECV(ecv))])),
-                EMulAssign => self.push_expr(Expr(e, vec![(Mul, Value::ECV(ecv))])),
-                EDivAssign => self.push_expr(Expr(e, vec![(Div, Value::ECV(ecv))])),
-                EModAssign => self.push_expr(Expr(e, vec![(Rem, Value::ECV(ecv))])),
-                EExpAssign => self.push_expr(Expr(e, vec![(Pow, Value::ECV(ecv))])),
-                _ => unreachable!(),
-            };
-            let ecv = E(i);
-            self.local_vars.insert(varname.clone(), ecv.clone());
-            return Ok(ecv);
-        }
-
-        let mut pairs = Vec::<ExprPair>::with_capacity(8);
-        loop {
-            match read_binaryop(bs)? {
-                None => break,
-                Some(bop) => {
-                    let val = self.read_value(bs, depth)?;
-                    pairs.push((bop, val));
-                }
-            }
-        }
-
-        spaces(bs);
-
-        if expect_eof && !bs.is_empty() {
-            let bs_str = match from_utf8(bs) {
-                Ok(s) => s,
-                Err(..) => "Utf8Error while handling UnparsedTokensRemaining error",
-            };
-            return Err(Error::UnparsedTokensRemaining(bs_str.to_string()));
-        }
-
-        match first {
-            ECV(ecv) if (!expect_eof && pairs.len() == 0) => Ok(ecv),
-            _ => {
-                let i = self.push_expr(Expr(first, pairs));
-                Ok(E(i))
-            }
-        }
+        // match first {
+        //     Value::Const(_) if (!expect_eof && pairs.len() == 0) => Ok(Expr(first, vec![])),
+        //     _ => Ok(Expr(first, pairs)),
+        // }
     }
 
     // #[inline]
@@ -237,6 +248,22 @@ impl Ast {
     //         Ok(EExpr(self.read_expr(bs, depth + 1, false)?))
     //     }
     // }
+
+    #[inline]
+    fn read_expr_pairs(&mut self, bs: &mut &[u8], depth: usize) -> Result<Vec<ExprPair>, Error> {
+        let mut pairs = Vec::<ExprPair>::with_capacity(4);
+        loop {
+            match read_binaryop(bs)? {
+                None => break,
+                Some(bop) => {
+                    let val = self.read_value(bs, depth)?;
+                    pairs.push((bop, val));
+                }
+            }
+        }
+        spaces(bs);
+        Ok(pairs)
+    }
 
     #[inline]
     fn read_value(&mut self, bs: &mut &[u8], depth: usize) -> Result<Value, Error> {
@@ -272,12 +299,10 @@ impl Ast {
     }
 
     #[inline]
-    fn value_to_icv(&mut self, v: Value) -> ECV {
-        if let Value::ECV(ecv) = v {
-            ecv
-        } else {
-            let i = self.push_val(v);
-            E(i)
+    fn value_to_ecv(&mut self, v: Value) -> ECV {
+        match v {
+            ECV(ecv) => ecv,
+            _ => ECV::E(self.push_val(v)),
         }
     }
 
@@ -290,14 +315,14 @@ impl Ast {
                 b'-' => {
                     skip(bs);
                     let v = self.read_value(bs, depth + 1)?;
-                    let ecv = self.value_to_icv(v);
+                    let ecv = self.value_to_ecv(v);
                     Ok(Some(Neg(ecv)))
                 }
 
                 b'!' => {
                     skip(bs);
                     let v = self.read_value(bs, depth + 1)?;
-                    let ecv = self.value_to_icv(v);
+                    let ecv = self.value_to_ecv(v);
                     Ok(Some(Not(ecv)))
                 }
                 _ => Ok(None),
@@ -313,7 +338,7 @@ impl Ast {
             Some(b) => match b {
                 b'(' => {
                     skip(bs);
-                    let xi = self.read_expr(bs, depth + 1, false)?;
+                    let e = self.read_expr(bs, depth + 1)?;
                     spaces(bs);
                     if read(bs).ok_or(Error::EofWhileParsing(")".into()))? != b')' {
                         return Err(Error::ExpectedClosingParen(format!(
@@ -321,7 +346,7 @@ impl Ast {
                             str::from_utf8(bs).unwrap()
                         )));
                     }
-                    Ok(Some(Value::ECV(xi)))
+                    Ok(Some(ECV(E(self.push_expr(e)))))
                 }
                 _ => Ok(None),
             },
@@ -335,10 +360,6 @@ impl Ast {
             Some(varname) => {
                 if let Some(b'(') = read_open_parenthesis(bs)? {
                     Ok(Some(self.read_func(varname, bs, depth)?))
-                } else if let Some(aop) = read_assignop(bs)? {
-                    Ok(Some(AssignOp(varname, aop)))
-                } else if let Some(ecv) = self.local_vars.get(&varname) {
-                    Ok(Some(ECV(ecv.clone())))
                 } else {
                     Ok(Some(ECV(Var(varname))))
                 }
@@ -373,8 +394,8 @@ impl Ast {
                     }
                 }
             }
-
-            args.push(self.read_expr(bs, depth + 1, false)?);
+            let e = self.read_expr(bs, depth + 1)?;
+            args.push(E(self.push_expr(e)));
         }
 
         Ok(Func(fname, sarg, args))
@@ -411,8 +432,8 @@ impl Ast {
                         }
                     }
                 }
-
-                args.push(self.read_expr(bs, depth + 1, false)?);
+                let e = self.read_expr(bs, depth + 1)?;
+                args.push(E(self.push_expr(e)));
             }
 
             Ok(Some(List(args)))
@@ -598,32 +619,32 @@ fn read_assignop(bs: &mut &[u8]) -> Result<Option<AssignOp>, Error> {
         Some(b) => match b {
             b'=' if !peek_is(bs, 1, b'=') => {
                 skip(bs);
-                Ok(Some(EAssign))
+                Ok(Some(Assign))
             }
 
             b'+' if peek_is(bs, 1, b'=') => {
                 skip_n(bs, 2);
-                Ok(Some(EAddAssign))
+                Ok(Some(AddAssign))
             }
             b'-' if peek_is(bs, 1, b'=') => {
                 skip_n(bs, 2);
-                Ok(Some(ESubAssign))
+                Ok(Some(SubAssign))
             }
             b'*' if peek_is(bs, 1, b'=') => {
                 skip_n(bs, 2);
-                Ok(Some(EMulAssign))
+                Ok(Some(MulAssign))
             }
             b'/' if peek_is(bs, 1, b'=') => {
                 skip_n(bs, 2);
-                Ok(Some(EDivAssign))
+                Ok(Some(DivAssign))
             }
             b'%' if peek_is(bs, 1, b'=') => {
                 skip_n(bs, 2);
-                Ok(Some(EModAssign))
+                Ok(Some(RemAssign))
             }
             b'^' if peek_is(bs, 1, b'=') => {
                 skip_n(bs, 2);
-                Ok(Some(EExpAssign))
+                Ok(Some(PowAssign))
             }
             _ => Ok(None),
         },
