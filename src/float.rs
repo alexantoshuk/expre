@@ -1,7 +1,62 @@
-use bytemuck::*;
+use crate::{and, max, min};
+use std::cmp::Ordering;
 use std::hash::{Hash, Hasher};
 use std::ops::{Add, Div, Index, Mul, Neg, Sub};
 use wide::*;
+#[derive(Debug, Copy, Clone, Default)]
+pub struct F64(pub f64);
+impl From<f64> for F64 {
+    #[inline]
+    fn from(value: f64) -> Self {
+        Self(value)
+    }
+}
+impl From<F64> for f64 {
+    #[inline]
+    fn from(value: F64) -> Self {
+        value.0
+    }
+}
+impl From<f32> for F64 {
+    #[inline]
+    fn from(value: f32) -> Self {
+        Self(value as f64)
+    }
+}
+impl From<F64> for f32 {
+    #[inline]
+    fn from(value: F64) -> Self {
+        value.0 as f32
+    }
+}
+
+impl PartialEq for F64 {
+    #[inline]
+    fn eq(&self, other: &Self) -> bool {
+        self.0.to_bits() == other.0.to_bits()
+    }
+}
+impl Eq for F64 {}
+impl Ord for F64 {
+    #[inline]
+    fn cmp(&self, other: &Self) -> Ordering {
+        self.0.to_bits().cmp(&other.0.to_bits())
+    }
+}
+
+impl PartialOrd for F64 {
+    #[inline]
+    fn partial_cmp(&self, other: &Self) -> Option<Ordering> {
+        Some(self.cmp(other))
+    }
+}
+
+impl Hash for F64 {
+    #[inline]
+    fn hash<H: Hasher>(&self, state: &mut H) {
+        self.0.to_bits().hash(state)
+    }
+}
 
 pub trait Mask: Copy + Clone + PartialEq + Default {
     const FALSE: Self;
@@ -47,7 +102,8 @@ impl Mask for bool {
 }
 
 pub trait Float:
-    Pod
+    Copy
+    + Clone
     + PartialEq
     + Add<Output = Self>
     + Sub<Output = Self>
@@ -72,21 +128,6 @@ pub trait Float:
         self.ne(Self::ZERO)
     }
 
-    // fn add(self, other: Self) -> Self {
-    //     self + other
-    // }
-    // fn sub(self, other: Self) -> Self {
-    //     self - other
-    // }
-    // fn mul(self, other: Self) -> Self {
-    //     self * other
-    // }
-    // fn div(self, other: Self) -> Self {
-    //     self / other
-    // }
-    // fn neg(self) -> Self {
-    //     -self
-    // }
     fn rem(self, other: Self) -> Self;
 
     fn eq(self, other: Self) -> Self::Mask;
@@ -168,26 +209,6 @@ macro_rules! impl_float {
                 b.into()
             }
 
-            // #[inline(always)]
-            // fn add(self, other: Self) -> Self {
-            //     self + other
-            // }
-            // #[inline(always)]
-            // fn sub(self, other: Self) -> Self {
-            //     self - other
-            // }
-            // #[inline(always)]
-            // fn mul(self, other: Self) -> Self {
-            //     self * other
-            // }
-            // #[inline(always)]
-            // fn div(self, other: Self) -> Self {
-            //     self / other
-            // }
-            // #[inline(always)]
-            // fn neg(self) -> Self {
-            //     -self
-            // }
             #[inline(always)]
             fn rem(self, other: Self) -> Self {
                 ((self % other) + other) % other
@@ -494,82 +515,136 @@ impl Float for f32x8 {
     }
 }
 
-pub trait Float2<T: Float>:
-    Pod + PartialEq + Index<usize, Output = T> + From<[T; 2]> + Into<[T; 2]> + Default
-{
-    #[inline(always)]
-    fn eq(self, other: Self) -> T::Mask {
-        self[0].eq(other[0]).and(self[1].eq(other[1]))
-    }
+macro_rules! trait_FloatN {
+    ($Name: ident, $N:literal, $($i:literal),+) => {
+        pub trait $Name<T: Float>:
+            Copy
+            + Clone
+            + PartialEq
+            + Index<usize, Output = T>
+            + From<[T; $N]>
+            + Into<[T; $N]>
+            + Default
+        {
+            #[inline(always)]
+            fn eq(self, other: Self) -> T::Mask {
+                and!(
+                    $(self[$i].eq(other[$i])),+
+                )
 
-    #[inline(always)]
-    fn ne(self, other: Self) -> T::Mask {
-        self[0].ne(other[0]).and(self[1].ne(other[1]))
-    }
+            }
 
-    #[inline(always)]
-    fn select(cond: T::Mask, then: Self, else_: Self) -> Self {
-        [
-            T::select(cond, then[0], else_[0]),
-            T::select(cond, then[1], else_[1]),
-        ]
-        .into()
-    }
+            #[inline(always)]
+            fn ne(self, other: Self) -> T::Mask {
+                and!(
+                    $(self[$i].ne(other[$i])),+
+                )
+            }
 
-    #[inline(always)]
-    fn mincomp(self) -> T {
-        T::min(self[0], self[1])
-    }
+            #[inline(always)]
+            fn select(cond: T::Mask, then: Self, else_: Self) -> Self {
+                [
+                    $(T::select(cond, then[$i], else_[$i])),+
+                ]
+                .into()
+            }
 
-    #[inline(always)]
-    fn maxcomp(self) -> T {
-        T::max(self[0], self[1])
-    }
+            #[inline(always)]
+            fn mincomp(self) -> T {
+                min!(
+                    $(self[$i]),+
+                )
+            }
+
+            #[inline(always)]
+            fn maxcomp(self) -> T {
+                max!(
+                    $(self[$i]),+
+                )
+            }
+        }
+    };
 }
+
+trait_FloatN!(Float2, 2, 0, 1);
+trait_FloatN!(Float3, 3, 0, 1, 2);
 
 impl<T: Float> Float2<T> for [T; 2] {}
-
-pub trait Float3<T: Float>:
-    Pod + PartialEq + Index<usize, Output = T> + From<[T; 3]> + Into<[T; 3]> + Default
-{
-    #[inline(always)]
-    fn eq(self, other: Self) -> T::Mask {
-        self[0]
-            .eq(other[0])
-            .and(self[1].eq(other[1]))
-            .and(self[2].eq(other[2]))
-    }
-
-    #[inline(always)]
-    fn ne(self, other: Self) -> T::Mask {
-        self[0]
-            .ne(other[0])
-            .and(self[1].ne(other[1]))
-            .and(self[2].ne(other[2]))
-    }
-
-    #[inline(always)]
-    fn select(cond: T::Mask, then: Self, else_: Self) -> Self {
-        [
-            T::select(cond, then[0], else_[0]),
-            T::select(cond, then[1], else_[1]),
-            T::select(cond, then[2], else_[2]),
-        ]
-        .into()
-    }
-
-    #[inline(always)]
-    fn mincomp(self) -> T {
-        T::min(self[0], self[1]).min(self[2])
-    }
-
-    #[inline(always)]
-    fn maxcomp(self) -> T {
-        T::max(self[0], self[1]).max(self[2])
-    }
-}
-
 impl<T: Float> Float3<T> for [T; 3] {}
+
+// pub trait Float2<T: Float>:
+//     Copy + Clone + PartialEq + Index<usize, Output = T> + From<[T; 2]> + Into<[T; 2]> + Default
+// {
+//     #[inline(always)]
+//     fn eq(self, other: Self) -> T::Mask {
+//         self[0].eq(other[0]).and(self[1].eq(other[1]))
+//     }
+
+//     #[inline(always)]
+//     fn ne(self, other: Self) -> T::Mask {
+//         self[0].ne(other[0]).and(self[1].ne(other[1]))
+//     }
+
+//     #[inline(always)]
+//     fn select(cond: T::Mask, then: Self, else_: Self) -> Self {
+//         [
+//             T::select(cond, then[0], else_[0]),
+//             T::select(cond, then[1], else_[1]),
+//         ]
+//         .into()
+//     }
+
+//     #[inline(always)]
+//     fn mincomp(self) -> T {
+//         T::min(self[0], self[1])
+//     }
+
+//     #[inline(always)]
+//     fn maxcomp(self) -> T {
+//         T::max(self[0], self[1])
+//     }
+// }
+
+// pub trait Float3<T: Float>:
+//     Copy + Clone + PartialEq + Index<usize, Output = T> + From<[T; 3]> + Into<[T; 3]> + Default
+// {
+//     #[inline(always)]
+//     fn eq(self, other: Self) -> T::Mask {
+//         self[0]
+//             .eq(other[0])
+//             .and(self[1].eq(other[1]))
+//             .and(self[2].eq(other[2]))
+//     }
+
+//     #[inline(always)]
+//     fn ne(self, other: Self) -> T::Mask {
+//         self[0]
+//             .ne(other[0])
+//             .and(self[1].ne(other[1]))
+//             .and(self[2].ne(other[2]))
+//     }
+
+//     #[inline(always)]
+//     fn select(cond: T::Mask, then: Self, else_: Self) -> Self {
+//         [
+//             T::select(cond, then[0], else_[0]),
+//             T::select(cond, then[1], else_[1]),
+//             T::select(cond, then[2], else_[2]),
+//         ]
+//         .into()
+//     }
+
+//     #[inline(always)]
+//     fn mincomp(self) -> T {
+//         T::min(self[0], self[1]).min(self[2])
+//     }
+
+//     #[inline(always)]
+//     fn maxcomp(self) -> T {
+//         T::max(self[0], self[1]).max(self[2])
+//     }
+// }
+
 // macro_rules! impl_for_float_array {
 //     ( $N:tt, $($f:ident(self $(, $a:ident)*),)*) => {
 //         impl<T: Float> Float for [T; $N] {

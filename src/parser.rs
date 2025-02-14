@@ -60,10 +60,25 @@ impl Ast {
         if expr_str.len() > DEFAULT_EXPR_LEN_LIMIT {
             return Err(Error::TooLong);
         }
+
         let mut bs = expr_str.as_bytes();
         loop {
-            let stmt = self.read_stmt(&mut bs)?;
-            self.push_stmt(stmt);
+            let first = self.read_value(&mut bs, 0)?;
+            match read_assignop(&mut bs)? {
+                Some(aop) => match first {
+                    ECV(Var(name)) => {
+                        let e = self.read_expr(&mut bs, 0)?;
+                        let stmt = Statement::OpAssign(name, aop, e.to_ecv(self));
+                        self.push_stmt(stmt);
+                    }
+                    _ => unimplemented!(), // TODO: index assignment
+                },
+                None => {
+                    let pairs = self.read_expr_pairs(&mut bs, 0)?;
+                    let e = Expr(first, pairs);
+                    self.push_expr(e);
+                }
+            };
             if bs.is_empty() {
                 break;
             }
@@ -152,10 +167,18 @@ pub(crate) type ExprPair = (BinaryOp, Value);
 #[derive(PartialEq, Debug)]
 pub(crate) struct Expr(pub Value, pub Vec<ExprPair>);
 
+impl Expr {
+    fn to_ecv(self, ast: &mut Ast) -> ECV {
+        match self.0 {
+            Value::ECV(ecv) if self.1.len() == 0 => ecv,
+            _ => ECV::E(ast.push_expr(self)),
+        }
+    }
+}
 #[derive(PartialEq, Debug)]
 pub(crate) enum Statement {
-    OpAssign(String, AssignOp, Expr),
-    Return(Expr),
+    OpAssign(String, AssignOp, ECV),
+    // Return(ECV),
 }
 
 impl Display for Expr {
@@ -178,44 +201,15 @@ impl Display for Statement {
         match self {
             Self::OpAssign(s, op, e) => {
                 write!(f, "{s} {op} {e}");
-            }
-            Self::Return(e) => {
-                write!(f, "{e}");
-            }
+            } // Self::Return(e) => {
+              //     write!(f, "{e}");
+              // }
         }
         Ok(())
     }
 }
 
 impl Ast {
-    #[inline]
-    fn read_stmt(&mut self, bs: &mut &[u8]) -> Result<Statement, Error> {
-        let first = self.read_value(bs, 0)?;
-        let stmt = match read_assignop(bs)? {
-            Some(aop) => match first {
-                ECV(Var(name)) => {
-                    let e = self.read_expr(bs, 0)?;
-                    Statement::OpAssign(name, aop, e)
-                }
-                _ => unimplemented!(),
-            },
-            None => {
-                let pairs = self.read_expr_pairs(bs, 0)?;
-                Statement::Return(Expr(first, pairs))
-            }
-        };
-
-        Ok(stmt)
-
-        // if !bs.is_empty() {
-        //     let bs_str = match from_utf8(bs) {
-        //         Ok(s) => s,
-        //         Err(..) => "Utf8Error while handling UnparsedTokensRemaining error",
-        //     };
-        //     return Err(Error::UnparsedTokensRemaining(bs_str.to_string()));
-        // }
-    }
-
     #[inline]
     fn read_expr(&mut self, bs: &mut &[u8], depth: usize) -> Result<Expr, Error> {
         if depth > DEFAULT_EXPR_DEPTH_LIMIT {

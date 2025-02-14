@@ -109,17 +109,52 @@ macro_rules! map4 {
 }
 pub(crate) use map4;
 
-macro_rules! max {
+macro_rules! and {
     // Base case: when there's only one argument
     ($x:expr) => {
-        &$x
+        $x
     };
     // Recursive case: compare the first argument with the max of the rest
     ($x:expr, $($rest:expr),+) => {
-        std::cmp::max(&$x, crate::max!($($rest),+))
+        $x.and(crate::and!($($rest),+))
+    };
+}
+pub(crate) use and;
+
+macro_rules! min {
+    // Base case: when there's only one argument
+    ($x:expr) => {
+        $x
+    };
+    // Recursive case: compare the first argument with the max of the rest
+    ($x:expr, $($rest:expr),+) => {
+        $x.min(crate::min!($($rest),+))
+    };
+}
+pub(crate) use min;
+
+macro_rules! max {
+    // Base case: when there's only one argument
+    ($x:expr) => {
+        $x
+    };
+    // Recursive case: compare the first argument with the max of the rest
+    ($x:expr, $($rest:expr),+) => {
+        $x.max(crate::max!($($rest),+))
     };
 }
 pub(crate) use max;
+// macro_rules! max {
+//     // Base case: when there's only one argument
+//     ($x:expr) => {
+//         &$x
+//     };
+//     // Recursive case: compare the first argument with the max of the rest
+//     ($x:expr, $($rest:expr),+) => {
+//         std::cmp::max(&$x, crate::max!($($rest),+))
+//     };
+// }
+// pub(crate) use max;
 
 macro_rules! compile_op {
     ($ename:ident, $fname:ident, ($($a:ident),+ )) => {

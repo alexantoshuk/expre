@@ -111,24 +111,6 @@ where
     }
 }
 
-// impl<M, CTX> EvalB<M, CTX> for B
-// where
-//     M: Module,
-//     CTX: Context,
-// {
-//     #[inline]
-//     fn eval(&self, ex: &Expression<M>, ctx: &CTX) -> <CTX::T as Float>::Mask {
-//         match self {
-//             Self::CONST(c) => <CTX::T as Float>::Mask::from_bool(*c),
-//             Self::VAR(offset) => ctx.f(*offset).to_mask(),
-//             Self::I(i) => match ex.get(*i) {
-//                 BOP(o) => o.eval(ex, ctx),
-//                 _ => unreachable!(),
-//             },
-//         }
-//     }
-// }
-
 impl<M, CTX> Eval<M, CTX> for F
 where
     M: Module,
@@ -222,6 +204,7 @@ where
             Self::NOT(a) => Mask::not(a.eval(ex, ctx)),
             Self::OR(l, r) => Mask::or(l.eval(ex, ctx), r.eval(ex, ctx)),
             Self::AND(l, r) => Mask::and(l.eval(ex, ctx), r.eval(ex, ctx)),
+
             Self::IF(b, then, els) => {
                 Mask::select(b.eval(ex, ctx), then.eval(ex, ctx), els.eval(ex, ctx))
             }
@@ -319,8 +302,9 @@ mod test {
     use crate::parser::Ast;
     #[test]
     fn test_eval() {
-        let expr_str = "v=2;a=5+id;b=[5,a];a = a+[6,2];c=(a+2)*(a+1)*4;c*b+v";
-        // let expr_str = "(2*id)+(2*id)+(2*id)*2+1";
+        let expr_str = "a=id; a += maxcomp([id,5]) + a+id ; a";
+        // let expr_str = "a=id;a = a+id+a+id;a";
+        // let expr_str = "a=id+id+id+id;a";
         // macro_rules! apply_context {
         //     (struct $NAME: ident { }) => {};
         // }

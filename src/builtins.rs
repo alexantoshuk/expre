@@ -27,19 +27,23 @@ macro_rules! impl_std_fn {
         }
         paste!{
             #[allow(non_camel_case_types)]
-            #[derive(Clone, Debug)]
+            #[derive(Debug, Copy, Clone, PartialEq, Eq, PartialOrd, Ord, Hash)]
             pub enum STDFN {
+                // MINCOMP2(F2),
+                // MAXCOMP2(F2),
+                // MINCOMP3(F3),
+                // MAXCOMP3(F3),
                 $([<$fname:upper>]($(_type!($arg, F)),*)),*
             }
 
             #[allow(non_camel_case_types)]
-            #[derive(Clone, Debug)]
+            #[derive(Debug, Copy, Clone, PartialEq, Eq, PartialOrd, Ord, Hash)]
             pub enum STDFN2 {
                 $([<$fname:upper>]($(_type!($arg, F2)),*)),*
             }
 
             #[allow(non_camel_case_types)]
-            #[derive(Clone, Debug)]
+            #[derive(Debug, Copy, Clone, PartialEq, Eq, PartialOrd, Ord, Hash)]
             pub enum STDFN3 {
                 $([<$fname:upper>]($(_type!($arg, F3)),*)),*
             }
@@ -48,6 +52,7 @@ macro_rules! impl_std_fn {
             pub(crate) fn dispatch_func(name: &str, string: Option<&str>, args: &[ARG]) -> Option<OP>{
                 match (name, string, args) {
                     $((stringify!($fname), None, [$($arg),*]) => {Some(compile_stdfn!([<$fname:upper>], $fname, ($($arg),*)))})*
+                    // ("mincomp", None, [F2(_)]) => {Some(FOP!(MINCOMP2, mincomp, (x)))}
                     _ => None,
                 }
             }
@@ -62,7 +67,6 @@ macro_rules! impl_std_fn {
                 fn eval(&self, en: &Expression<M>, ctx: &CTX) -> Self::Output {
                     match self {
                         $(Self::[<$fname:upper>]($($arg),*) => {CTX::T::$fname($($arg.eval(en, ctx)),*)})*
-
                     }
                 }
             }
@@ -77,7 +81,6 @@ macro_rules! impl_std_fn {
                 fn eval(&self, en: &Expression<M>, ctx: &CTX) -> Self::Output {
                     match self {
                         $(Self::[<$fname:upper>]($($arg),*) => {map2!(CTX::T::$fname, $($arg.eval(en, ctx)),+)})*
-
                     }
                 }
             }
@@ -92,7 +95,6 @@ macro_rules! impl_std_fn {
                 fn eval(&self, en: &Expression<M>, ctx: &CTX) -> Self::Output {
                     match self {
                         $(Self::[<$fname:upper>]($($arg),*) => {map3!(CTX::T::$fname, $($arg.eval(en, ctx)),+)})*
-
                     }
                 }
             }

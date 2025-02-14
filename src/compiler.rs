@@ -83,98 +83,26 @@ impl<'m, M: Module> Expression<'m, M> {
     pub fn compile(&mut self, ast: &Ast) -> Result<(), Error> {
         self.ops.clear();
 
-        let mut offset = 0;
-        let mut stores = Vec::with_capacity(2);
-        if let Some(Statement::Return(last_ex)) = ast.stmts.last() {
-            for stmt in &ast.stmts {
-                match stmt {
-                    Statement::OpAssign(name, aop, ex) => match aop {
-                        Assign => {
-                            let op = ex.compile(ast, self)?;
-                            let arg = op.into_arg(self);
-                            match arg {
-                                F(F::I(i)) => match self.locals.entry(name.into()) {
-                                    Entry::Vacant(e) => {
-                                        e.insert(F(F::VAR(LOCAL(offset))));
-                                        stores.push(FOP(FOP::STORE(offset, i)));
-                                        offset += 1;
-                                    }
-                                    Entry::Occupied(mut e) => {
-                                        if let F(F::VAR(LOCAL(offset))) = e.get() {
-                                            stores.push(FOP(FOP::STORE(*offset, i)));
-                                        } else {
-                                            *e.get_mut() = F(F::VAR(LOCAL(offset)));
-                                            stores.push(FOP(FOP::STORE(offset, i)));
-                                            offset += 1;
-                                        }
-                                    }
-                                },
-                                F2(F2::I(i)) => match self.locals.entry(name.into()) {
-                                    Entry::Vacant(e) => {
-                                        e.insert(F2(F2::VAR(LOCAL(offset))));
-                                        stores.push(FOP2(FOP2::STORE(offset, i)));
-                                        offset += 2;
-                                    }
-                                    Entry::Occupied(mut e) => {
-                                        if let F2(F2::VAR(LOCAL(offset))) = e.get() {
-                                            stores.push(FOP2(FOP2::STORE(*offset, i)));
-                                        } else {
-                                            *e.get_mut() = F2(F2::VAR(LOCAL(offset)));
-                                            stores.push(FOP2(FOP2::STORE(offset, i)));
-                                            offset += 2;
-                                        }
-                                    }
-                                },
-                                F3(F3::I(i)) => match self.locals.entry(name.into()) {
-                                    Entry::Vacant(e) => {
-                                        e.insert(F3(F3::VAR(LOCAL(offset))));
-                                        stores.push(FOP3(FOP3::STORE(offset, i)));
-                                        offset += 3;
-                                    }
-                                    Entry::Occupied(mut e) => {
-                                        if let F3(F3::VAR(LOCAL(offset))) = e.get() {
-                                            stores.push(FOP3(FOP3::STORE(*offset, i)));
-                                        } else {
-                                            *e.get_mut() = F3(F3::VAR(LOCAL(offset)));
-                                            stores.push(FOP3(FOP3::STORE(offset, i)));
-                                            offset += 3;
-                                        }
-                                    }
-                                },
-                                B(B::I(i)) => match self.locals.entry(name.into()) {
-                                    Entry::Vacant(e) => {
-                                        e.insert(B(B::VAR(LOCAL(offset))));
-                                        stores.push(BOP(BOP::STORE(offset, i)));
-                                        offset += 1;
-                                    }
-                                    Entry::Occupied(mut e) => {
-                                        if let B(B::VAR(LOCAL(offset))) = e.get() {
-                                            stores.push(BOP(BOP::STORE(*offset, i)));
-                                        } else {
-                                            *e.get_mut() = B(B::VAR(LOCAL(offset)));
-                                            stores.push(BOP(BOP::STORE(offset, i)));
-                                            offset += 1;
-                                        }
-                                    }
-                                },
-                                _ => {
-                                    self.locals.insert(name.into(), arg);
-                                }
-                            }
-                        }
-                        _ => unimplemented!(),
-                    },
-                    _ => {} // Statement::Return(e) => e.compile(ast, self),
-                }
+        for stmt in &ast.stmts {
+            match stmt {
+                Statement::OpAssign(name, aop, ecv) => match aop {
+                    Assign => {
+                        let op = ecv.compile(ast, self)?;
+                        let arg = op.into_arg(self);
+                        self.locals.insert(name.into(), arg);
+                    }
+                    AddAssign => {
+                        let ex = Expr(ECV(ECV::Var(name.clone())), vec![(Add, ECV(ecv.clone()))]);
+                        let op = ex.compile(ast, self)?;
+                        let arg = op.into_arg(self);
+                        self.locals.insert(name.into(), arg);
+                    }
+                    _ => unimplemented!(),
+                },
             }
-
-            let op = last_ex.compile(ast, self)?;
-            self.ops.push(op);
-            self.ops.append(&mut stores);
-            Ok(())
-        } else {
-            Err(Error::InvalidType("Nothing returned".into()))
         }
+
+        Ok(())
     }
 
     #[inline]
@@ -236,6 +164,7 @@ impl<M: Module> IntoArg<M, B> for BOP {
     fn into_arg(self, ex: &mut Expression<M>) -> B {
         match self {
             BOP::CONST(c) => B::CONST(c),
+            BOP::I(i) => B::I(i),
             _ => B::I(ex.push(BOP(self))),
         }
     }
@@ -246,6 +175,7 @@ impl<M: Module> IntoArg<M, F> for BOP {
     fn into_arg(self, ex: &mut Expression<M>) -> F {
         match self {
             BOP::CONST(c) => F::CONST(c.into()),
+            BOP::I(i) => F::I(i),
             _ => F::I(ex.push(BOP(self))),
         }
     }
@@ -256,6 +186,7 @@ impl<M: Module> IntoArg<M, F2> for BOP {
     fn into_arg(self, ex: &mut Expression<M>) -> F2 {
         match self {
             BOP::CONST(c) => F2::CONST([c.into(); 2]),
+            BOP::I(i) => F2::F(F::I(i)),
             _ => F2::F(F::I(ex.push(BOP(self)))),
         }
     }
@@ -266,6 +197,7 @@ impl<M: Module> IntoArg<M, F3> for BOP {
     fn into_arg(self, ex: &mut Expression<M>) -> F3 {
         match self {
             BOP::CONST(c) => F3::CONST([c.into(); 3]),
+            BOP::I(i) => F3::F(F::I(i)),
             _ => F3::F(F::I(ex.push(BOP(self)))),
         }
     }
@@ -277,6 +209,7 @@ impl<M: Module> IntoArg<M, F> for FOP {
         match self {
             FOP::CONST(c) => F::CONST(c),
             FOP::VAR(v) => F::VAR(v),
+            FOP::I(i) => F::I(i),
             _ => F::I(ex.push(FOP(self))),
         }
     }
@@ -288,6 +221,7 @@ impl<M: Module> IntoArg<M, B> for FOP {
         match self {
             FOP::CONST(c) => B::CONST((c != 0.0).into()),
             FOP::VAR(v) => B::VAR(v),
+            FOP::I(i) => B::I(i),
             _ => B::I(ex.push(FOP(self))),
         }
     }
@@ -298,6 +232,7 @@ impl<M: Module> IntoArg<M, F2> for FOP {
     fn into_arg(self, ex: &mut Expression<M>) -> F2 {
         match self {
             FOP::CONST(c) => F2::CONST([c; 2]),
+            FOP::I(i) => F2::F(F::I(i)),
             _ => F2::F(F::I(ex.push(FOP(self)))),
         }
     }
@@ -308,6 +243,7 @@ impl<M: Module> IntoArg<M, F3> for FOP {
     fn into_arg(self, ex: &mut Expression<M>) -> F3 {
         match self {
             FOP::CONST(c) => F3::CONST([c; 3]),
+            FOP::I(i) => F3::F(F::I(i)),
             _ => F3::F(F::I(ex.push(FOP(self)))),
         }
     }
@@ -319,6 +255,7 @@ impl<M: Module> IntoArg<M, F2> for FOP2 {
         match self {
             FOP2::CONST(c) => F2::CONST(c),
             FOP2::VAR(v) => F2::VAR(v),
+            FOP2::I(i) => F2::I(i),
             _ => F2::I(ex.push(FOP2(self))),
         }
     }
@@ -330,6 +267,7 @@ impl<M: Module> IntoArg<M, F3> for FOP3 {
         match self {
             FOP3::CONST(c) => F3::CONST(c),
             FOP3::VAR(v) => F3::VAR(v),
+            FOP3::I(i) => F3::I(i),
             _ => F3::I(ex.push(FOP3(self))),
         }
     }
@@ -408,14 +346,14 @@ impl<M: Module> Expression<'_, M> {
                 (FOP(FOP::CONST(c0)), FOP2(FOP2::CONST([cx1, cy1]))) => {
                     out = FOP2(FOP2::CONST([c0 * cx1, c0 * cy1]));
                 }
-                (FOP2(FOP2::CONST(c0)), FOP2(FOP2::CONST(c1))) => {
-                    out = FOP2(FOP2::CONST(map2!(std::ops::Mul::mul, c0, c1)));
+                (FOP2(FOP2::CONST([cx0, cy0])), FOP2(FOP2::CONST([cx1, cy1]))) => {
+                    out = FOP2(FOP2::CONST([cx0 * cx1, cy0 * cy1]));
                 }
                 (FOP(FOP::CONST(c0)), FOP3(FOP3::CONST([cx1, cy1, cz1]))) => {
                     out = FOP3(FOP3::CONST([c0 * cx1, c0 * cy1, c0 * cz1]));
                 }
-                (FOP3(FOP3::CONST(c0)), FOP3(FOP3::CONST(c1))) => {
-                    out = FOP3(FOP3::CONST(map3!(std::ops::Mul::mul, c0, c1)));
+                (FOP3(FOP3::CONST([cx0, cy0, cz0])), FOP3(FOP3::CONST([cx1, cy1, cz1]))) => {
+                    out = FOP3(FOP3::CONST([cx0 * cx1, cy0 * cy1, cz0 * cz1]));
                 }
                 (op1 @ (FOP(FOP::CONST(_)) | FOP2(FOP2::CONST(_)) | FOP3(FOP3::CONST(_))), op2) => {
                     const_out = op1;
@@ -477,14 +415,14 @@ impl<M: Module> Expression<'_, M> {
                 (FOP(FOP::CONST(c0)), FOP2(FOP2::CONST([cx1, cy1]))) => {
                     out = FOP2(FOP2::CONST([c0 + cx1, c0 + cy1]));
                 }
-                (FOP2(FOP2::CONST(c0)), FOP2(FOP2::CONST(c1))) => {
-                    out = FOP2(FOP2::CONST(map2!(std::ops::Add::add, c0, c1)));
+                (FOP2(FOP2::CONST([cx0, cy0])), FOP2(FOP2::CONST([cx1, cy1]))) => {
+                    out = FOP2(FOP2::CONST([cx0 + cx1, cy0 + cy1]));
                 }
                 (FOP(FOP::CONST(c0)), FOP3(FOP3::CONST([cx1, cy1, cz1]))) => {
                     out = FOP3(FOP3::CONST([c0 + cx1, c0 + cy1, c0 + cz1]));
                 }
-                (FOP3(FOP3::CONST(c0)), FOP3(FOP3::CONST(c1))) => {
-                    out = FOP3(FOP3::CONST(map3!(std::ops::Add::add, c0, c1)));
+                (FOP3(FOP3::CONST([cx0, cy0, cz0])), FOP3(FOP3::CONST([cx1, cy1, cz1]))) => {
+                    out = FOP3(FOP3::CONST([cx0 + cx1, cy0 + cy1, cz0 + cz1]));
                 }
                 (op1 @ (FOP(FOP::CONST(_)) | FOP2(FOP2::CONST(_)) | FOP3(FOP3::CONST(_))), op2) => {
                     const_out = op1;

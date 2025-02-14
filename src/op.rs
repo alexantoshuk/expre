@@ -1,11 +1,11 @@
 // use bytemuck::*;
 use crate::builtins::*;
 use crate::error::Error;
+use discriminant::Enum;
 use gxhash::GxHasher;
 use std::cmp::Ordering;
 use std::fmt::{self, Debug};
 use std::hash::{Hash, Hasher};
-
 #[derive(Debug, Copy, Clone, PartialEq, Eq, PartialOrd, Ord)]
 pub enum Type {
     B = 0,
@@ -14,23 +14,23 @@ pub enum Type {
     F3 = 3,
 }
 
-#[derive(Debug, Copy, Clone)]
-pub enum Adress {
-    F(usize),
-    F2(usize),
-    F3(usize),
-}
+// #[derive(Debug, Copy, Clone)]
+// pub enum Adress {
+//     F(usize),
+//     F2(usize),
+//     F3(usize),
+// }
 
-impl From<Adress> for OP {
-    #[inline]
-    fn from(value: Adress) -> Self {
-        match value {
-            Adress::F(i) => FOP(FOP::VAR(LOCAL(i))),
-            Adress::F2(i) => FOP2(FOP2::VAR(LOCAL(i))),
-            Adress::F3(i) => FOP3(FOP3::VAR(LOCAL(i))),
-        }
-    }
-}
+// impl From<Adress> for OP {
+//     #[inline]
+//     fn from(value: Adress) -> Self {
+//         match value {
+//             Adress::F(i) => FOP(FOP::VAR(LOCAL(i))),
+//             Adress::F2(i) => FOP2(FOP2::VAR(LOCAL(i))),
+//             Adress::F3(i) => FOP3(FOP3::VAR(LOCAL(i))),
+//         }
+//     }
+// }
 
 #[derive(Debug, Clone)]
 pub enum ARG {
@@ -77,12 +77,20 @@ impl From<ARG> for OP {
         match value {
             F(F::CONST(c)) => FOP(FOP::CONST(c)),
             F(F::VAR(v)) => FOP(FOP::VAR(v)),
+            F(F::I(i)) => FOP(FOP::I(i)),
+
             F2(F2::CONST(c)) => FOP2(FOP2::CONST(c)),
             F2(F2::VAR(v)) => FOP2(FOP2::VAR(v)),
+            F2(F2::I(i)) => FOP2(FOP2::I(i)),
+
             F3(F3::CONST(c)) => FOP3(FOP3::CONST(c)),
             F3(F3::VAR(v)) => FOP3(FOP3::VAR(v)),
+            F3(F3::I(i)) => FOP3(FOP3::I(i)),
+
             B(B::CONST(c)) => BOP(BOP::CONST(c)),
             B(B::VAR(v)) => FOP(FOP::VAR(v)),
+            B(B::I(i)) => FOP(FOP::I(i)),
+
             _ => unreachable!(),
         }
     }
@@ -148,14 +156,14 @@ impl From<F> for ARG {
     }
 }
 
-#[derive(Clone, Copy, Hash, PartialEq, Eq, Debug)]
+#[derive(Debug, Clone, Copy, PartialEq, Eq, PartialOrd, Ord, Hash)]
 pub enum VAR {
     LOCAL(usize),
     GLOBAL(usize),
 }
 pub(crate) use crate::op::VAR::*;
 
-#[derive(Clone, Copy)]
+#[derive(Clone, Copy, PartialEq, Eq, PartialOrd, Ord, Hash)]
 pub enum B {
     I(usize),
     CONST(bool),
@@ -188,23 +196,11 @@ impl Debug for B {
     }
 }
 
-#[derive(Clone, Copy)]
+#[derive(Clone, Copy, Enum)]
 pub enum F {
     I(usize),
     CONST(f64),
     VAR(VAR),
-}
-
-impl Default for F {
-    fn default() -> Self {
-        Self::CONST(0.0)
-    }
-}
-
-impl From<f64> for F {
-    fn from(value: f64) -> Self {
-        Self::CONST(value)
-    }
 }
 
 impl From<B> for F {
@@ -214,6 +210,56 @@ impl From<B> for F {
             B::VAR(i) => F::VAR(i),
             B::I(i) => F::I(i),
         }
+    }
+}
+
+impl PartialEq for F {
+    #[inline]
+    fn eq(&self, other: &Self) -> bool {
+        match (self, other) {
+            (Self::CONST(s), Self::CONST(o)) => s.to_bits() == o.to_bits(),
+            (Self::VAR(s), Self::VAR(o)) => s == o,
+            (Self::I(s), Self::I(o)) => s == o,
+            _ => false,
+        }
+    }
+}
+
+impl Eq for F {}
+impl Ord for F {
+    #[inline]
+    fn cmp(&self, other: &Self) -> std::cmp::Ordering {
+        match (self, other) {
+            (Self::CONST(s), Self::CONST(o)) => s.to_bits().cmp(&o.to_bits()),
+            (Self::VAR(s), Self::VAR(o)) => s.cmp(o),
+            (Self::I(s), Self::I(o)) => s.cmp(o),
+            _ => self.discriminant().cmp(&other.discriminant()),
+        }
+    }
+}
+
+impl PartialOrd for F {
+    #[inline]
+    fn partial_cmp(&self, other: &Self) -> Option<Ordering> {
+        Some(self.cmp(other))
+    }
+}
+
+impl Hash for F {
+    #[inline]
+    fn hash<H: Hasher>(&self, state: &mut H) {
+        self.discriminant().hash(state);
+        match self {
+            Self::CONST(c) => c.to_bits().hash(state),
+            Self::VAR(v) => v.hash(state),
+            Self::I(i) => i.hash(state),
+        }
+    }
+}
+
+impl Default for F {
+    fn default() -> Self {
+        Self::CONST(Default::default())
     }
 }
 
@@ -291,6 +337,7 @@ impl OP {
 
 #[derive(Debug, Clone)]
 pub enum BOP {
+    I(usize),
     //---- Primitive Value Types:
     CONST(bool),
     STORE(usize, usize),
@@ -328,8 +375,9 @@ impl Default for BOP {
 /// OPS that return scalar T type aka FOP
 ///////////////////////////////////////////////////////////////////////////////////////////////////////////////////
 
-#[derive(Debug, Clone)]
+#[derive(Debug, Clone, PartialEq)]
 pub enum FOP {
+    I(usize),
     //---- Primitive Value Types:
     CONST(f64),
     VAR(VAR),
@@ -357,7 +405,7 @@ pub enum FOP {
 
 impl Default for FOP {
     fn default() -> Self {
-        Self::CONST(0.0)
+        Self::CONST(Default::default())
     }
 }
 
@@ -367,7 +415,7 @@ impl Default for FOP {
 
 macro_rules! make_array_FOP {
     ($N: literal, $ARG: ident, $OP: ident, $FN: ident) => {
-        #[derive(Clone, Copy)]
+        #[derive(Clone, Copy, Enum)]
         pub enum $ARG {
             I(usize),
             CONST([f64; $N]),
@@ -375,9 +423,55 @@ macro_rules! make_array_FOP {
             F(F),
         }
 
+        impl PartialEq for $ARG {
+            #[inline]
+            fn eq(&self, other: &Self) -> bool {
+                match (self, other) {
+                    (Self::CONST(s), Self::CONST(o)) => as_bytes(s) == as_bytes(o),
+                    (Self::VAR(s), Self::VAR(o)) => s == o,
+                    (Self::I(s), Self::I(o)) => s == o,
+                    (Self::F(s), Self::F(o)) => s == o,
+                    _ => false,
+                }
+            }
+        }
+        impl Eq for $ARG {}
+        impl Ord for $ARG {
+            #[inline]
+            fn cmp(&self, other: &Self) -> std::cmp::Ordering {
+                match (self, other) {
+                    (Self::CONST(s), Self::CONST(o)) => as_bytes(s).cmp(as_bytes(o)),
+                    (Self::VAR(s), Self::VAR(o)) => s.cmp(o),
+                    (Self::I(s), Self::I(o)) => s.cmp(o),
+                    (Self::F(s), Self::F(o)) => s.cmp(o),
+                    _ => self.discriminant().cmp(&other.discriminant()),
+                }
+            }
+        }
+
+        impl PartialOrd for $ARG {
+            #[inline]
+            fn partial_cmp(&self, other: &Self) -> Option<Ordering> {
+                Some(self.cmp(other))
+            }
+        }
+
+        impl Hash for $ARG {
+            #[inline]
+            fn hash<H: Hasher>(&self, state: &mut H) {
+                self.discriminant().hash(state);
+                match self {
+                    Self::CONST(c) => as_bytes(c).hash(state),
+                    Self::VAR(v) => v.hash(state),
+                    Self::I(i) => i.hash(state),
+                    Self::F(f) => f.hash(state),
+                }
+            }
+        }
+
         impl Default for $ARG {
             fn default() -> Self {
-                Self::CONST([0.0; $N])
+                Self::CONST(Default::default())
             }
         }
 
@@ -457,6 +551,7 @@ macro_rules! make_array_FOP {
 
         #[derive(Debug, Clone)]
         pub enum $OP {
+            I(usize),
             //---- Primitive Value Types:
             CONST([f64; $N]),
             VAR(VAR),
