@@ -1,62 +1,9 @@
-use crate::{and, max, min};
+use crate::{and, map, map8, map_n, max, min};
+use array_init;
 use std::cmp::Ordering;
 use std::hash::{Hash, Hasher};
 use std::ops::{Add, Div, Index, Mul, Neg, Sub};
 use wide::*;
-#[derive(Debug, Copy, Clone, Default)]
-pub struct F64(pub f64);
-impl From<f64> for F64 {
-    #[inline]
-    fn from(value: f64) -> Self {
-        Self(value)
-    }
-}
-impl From<F64> for f64 {
-    #[inline]
-    fn from(value: F64) -> Self {
-        value.0
-    }
-}
-impl From<f32> for F64 {
-    #[inline]
-    fn from(value: f32) -> Self {
-        Self(value as f64)
-    }
-}
-impl From<F64> for f32 {
-    #[inline]
-    fn from(value: F64) -> Self {
-        value.0 as f32
-    }
-}
-
-impl PartialEq for F64 {
-    #[inline]
-    fn eq(&self, other: &Self) -> bool {
-        self.0.to_bits() == other.0.to_bits()
-    }
-}
-impl Eq for F64 {}
-impl Ord for F64 {
-    #[inline]
-    fn cmp(&self, other: &Self) -> Ordering {
-        self.0.to_bits().cmp(&other.0.to_bits())
-    }
-}
-
-impl PartialOrd for F64 {
-    #[inline]
-    fn partial_cmp(&self, other: &Self) -> Option<Ordering> {
-        Some(self.cmp(other))
-    }
-}
-
-impl Hash for F64 {
-    #[inline]
-    fn hash<H: Hasher>(&self, state: &mut H) {
-        self.0.to_bits().hash(state)
-    }
-}
 
 pub trait Mask: Copy + Clone + PartialEq + Default {
     const FALSE: Self;
@@ -68,7 +15,179 @@ pub trait Mask: Copy + Clone + PartialEq + Default {
     fn not(self) -> Self;
     fn or(self, other: Self) -> Self;
     fn and(self, other: Self) -> Self;
-    fn select(cond: Self, then: Self, else_: Self) -> Self;
+
+    fn if_(cond: Self, then: Self, else_: Self) -> Self;
+}
+
+pub trait Float:
+    Copy
+    + Clone
+    + PartialEq
+    + Default
+    + Add<Output = Self>
+    + Sub<Output = Self>
+    + Mul<Output = Self>
+    + Div<Output = Self>
+    + Neg<Output = Self>
+{
+    type Mask: Mask;
+
+    const ZERO: Self;
+    const ONE: Self;
+    const HALF: Self;
+    const E: Self;
+    const PI: Self;
+
+    // fn add(self, other: Self) -> Self;
+    // fn sub(self, other: Self) -> Self;
+    // fn mul(self, other: Self) -> Self;
+    // fn div(self, other: Self) -> Self;
+    fn rem(self, other: Self) -> Self;
+    fn pow(self, n: Self) -> Self;
+    // fn neg(self) -> Self;
+
+    fn floor(self) -> Self;
+    fn ceil(self) -> Self;
+    fn round(self) -> Self;
+    fn recip(self) -> Self;
+    fn abs(self) -> Self;
+    fn ln(self) -> Self;
+    fn min(self, other: Self) -> Self;
+    fn max(self, other: Self) -> Self;
+    fn sqrt(self) -> Self;
+    fn cbrt(self) -> Self;
+    fn hypot(self, other: Self) -> Self;
+    fn sin(self) -> Self;
+    fn cos(self) -> Self;
+    fn deg(self) -> Self;
+    fn rad(self) -> Self;
+
+    #[inline(always)]
+    fn lerp(self, other: Self, t: Self) -> Self {
+        self * (Self::ONE - t) + other * t
+        // self.mul(Self::ONE.sub(t)).sub(other.mul(t))
+    }
+
+    #[inline(always)]
+    fn bias(self, b: Self) -> Self {
+        self.pow(b.ln() / Self::HALF.ln())
+        // self.pow(b.ln().div(Self::HALF.ln()))
+    }
+
+    #[inline(always)]
+    fn fit(self, oldmin: Self, oldmax: Self, newmin: Self, newmax: Self) -> Self {
+        newmin + (self - oldmin) * (newmax - newmin) / (oldmax - oldmin)
+        // newmin.add(
+        //     self.sub(oldmin)
+        //         .mul(newmax.sub(newmin))
+        //         .div(oldmax.sub(oldmin)),
+        // )
+    }
+    #[inline(always)]
+    fn fit01(self, newmin: Self, newmax: Self) -> Self {
+        newmin + self * (newmax - newmin)
+        // newmin.add(self.mul(newmax.sub(newmin)))
+    }
+    #[inline(always)]
+    fn clamp(self, min: Self, max: Self) -> Self {
+        self.max(min).min(max)
+    }
+    #[inline(always)]
+    fn clamp01(self) -> Self {
+        self.max(Self::ZERO).min(Self::ONE)
+    }
+
+    fn eq(self, other: Self) -> Self::Mask;
+    #[inline(always)]
+    fn ne(self, other: Self) -> Self::Mask {
+        self.eq(other).not()
+    }
+
+    fn lt(self, other: Self) -> Self::Mask;
+    fn le(self, other: Self) -> Self::Mask;
+    fn gt(self, other: Self) -> Self::Mask;
+    fn ge(self, other: Self) -> Self::Mask;
+
+    fn from_f64(f: f64) -> Self;
+    fn from_mask(b: Self::Mask) -> Self;
+
+    #[inline(always)]
+    fn to_mask(self) -> Self::Mask {
+        self.ne(Self::ZERO)
+    }
+
+    fn if_(cond: Self::Mask, then: Self, else_: Self) -> Self;
+}
+
+pub trait Float2<T: Float>:
+    Copy + Clone + PartialEq + Default + Index<usize, Output = T> + From<[T; 2]> + Into<[T; 2]>
+{
+    #[inline(always)]
+    fn if_(cond: T::Mask, then: Self, else_: Self) -> Self {
+        [
+            T::if_(cond, then[0], else_[0]),
+            T::if_(cond, then[1], else_[1]),
+        ]
+        .into()
+    }
+
+    #[inline(always)]
+    fn mincomp(self) -> T {
+        self[0].min(self[1])
+    }
+
+    #[inline(always)]
+    fn maxcomp(self) -> T {
+        self[0].max(self[1])
+    }
+
+    fn eq(self, other: Self) -> T::Mask {
+        self[0].eq(other[0]).and(self[1].eq(other[1]))
+    }
+
+    #[inline(always)]
+    fn ne(self, other: Self) -> T::Mask {
+        self[0].ne(other[0]).and(self[1].ne(other[1]))
+    }
+}
+
+pub trait Float3<T: Float>:
+    Copy + Clone + PartialEq + Default + Index<usize, Output = T> + From<[T; 3]> + Into<[T; 3]>
+{
+    #[inline(always)]
+    fn if_(cond: T::Mask, then: Self, else_: Self) -> Self {
+        [
+            T::if_(cond, then[0], else_[0]),
+            T::if_(cond, then[1], else_[1]),
+            T::if_(cond, then[2], else_[2]),
+        ]
+        .into()
+    }
+
+    #[inline(always)]
+    fn mincomp(self) -> T {
+        self[0].min(self[1]).min(self[2])
+    }
+
+    #[inline(always)]
+    fn maxcomp(self) -> T {
+        self[0].max(self[1]).max(self[2])
+    }
+
+    fn eq(self, other: Self) -> T::Mask {
+        self[0]
+            .eq(other[0])
+            .and(self[1].eq(other[1]))
+            .and(self[2].eq(other[2]))
+    }
+
+    #[inline(always)]
+    fn ne(self, other: Self) -> T::Mask {
+        self[0]
+            .ne(other[0])
+            .and(self[1].ne(other[1]))
+            .and(self[2].ne(other[2]))
+    }
 }
 
 impl Mask for bool {
@@ -92,7 +211,7 @@ impl Mask for bool {
         self && other
     }
     #[inline(always)]
-    fn select(cond: Self, then: Self, else_: Self) -> Self {
+    fn if_(cond: Self, then: Self, else_: Self) -> Self {
         if cond {
             then
         } else {
@@ -101,118 +220,16 @@ impl Mask for bool {
     }
 }
 
-pub trait Float:
-    Copy
-    + Clone
-    + PartialEq
-    + Add<Output = Self>
-    + Sub<Output = Self>
-    + Mul<Output = Self>
-    + Div<Output = Self>
-    + Neg<Output = Self>
-    + Default
-{
-    type Mask: Mask;
-
-    const ZERO: Self;
-    const ONE: Self;
-    const HALF: Self;
-    const E: Self;
-    const PI: Self;
-
-    fn from_f64(f: f64) -> Self;
-    fn from_mask(b: Self::Mask) -> Self;
-
-    #[inline(always)]
-    fn to_mask(self) -> Self::Mask {
-        self.ne(Self::ZERO)
-    }
-
-    fn rem(self, other: Self) -> Self;
-
-    fn eq(self, other: Self) -> Self::Mask;
-    fn ne(self, other: Self) -> Self::Mask;
-    fn lt(self, other: Self) -> Self::Mask;
-    fn le(self, other: Self) -> Self::Mask;
-    fn gt(self, other: Self) -> Self::Mask;
-    fn ge(self, other: Self) -> Self::Mask;
-
-    fn select(cond: Self::Mask, then: Self, else_: Self) -> Self;
-
-    fn floor(self) -> Self;
-    fn ceil(self) -> Self;
-    fn round(self) -> Self;
-    fn recip(self) -> Self;
-    fn abs(self) -> Self;
-    fn ln(self) -> Self;
-    fn min(self, other: Self) -> Self;
-    fn max(self, other: Self) -> Self;
-    fn pow(self, n: Self) -> Self;
-    fn sqrt(self) -> Self;
-    fn cbrt(self) -> Self;
-    fn hypot(self, other: Self) -> Self;
-    fn sin(self) -> Self;
-    fn cos(self) -> Self;
-    fn deg(self) -> Self;
-    fn rad(self) -> Self;
-
-    #[inline(always)]
-    fn lerp(self, other: Self, t: Self) -> Self {
-        self * (Self::ONE - t) + other * t
-    }
-
-    #[inline(always)]
-    fn bias(self, b: Self) -> Self {
-        self.pow(b.ln() / Self::HALF.ln())
-        // self.pow(b.ln().div(Self::HALF.ln()))
-    }
-    #[inline(always)]
-    fn fit(self, oldmin: Self, oldmax: Self, newmin: Self, newmax: Self) -> Self {
-        newmin + (self - oldmin) * (newmax - newmin) / (oldmax - oldmin)
-        // newmin.add(
-        //     self.sub(oldmin)
-        //         .mul(newmax.sub(newmin))
-        //         .div(oldmax.sub(oldmin)),
-        // )
-    }
-    #[inline(always)]
-    fn fit01(self, newmin: Self, newmax: Self) -> Self {
-        newmin + self * (newmax - newmin)
-        // newmin.add(self.mul(newmax.sub(newmin)))
-    }
-    #[inline(always)]
-    fn clamp(self, min: Self, max: Self) -> Self {
-        self.max(min).min(max)
-    }
-    #[inline(always)]
-    fn clamp01(self) -> Self {
-        self.max(Self::ZERO).min(Self::ONE)
-    }
-}
-
 macro_rules! impl_float {
     ($T:ident) => {
         impl Float for $T {
             type Mask = bool;
+
             const ZERO: Self = 0.0;
             const ONE: Self = 1.0;
             const HALF: Self = 0.5;
             const E: Self = std::$T::consts::E;
             const PI: Self = std::$T::consts::PI;
-
-            #[inline(always)]
-            fn from_f64(f: f64) -> Self {
-                f as $T
-            }
-            #[inline(always)]
-            fn from_mask(b: Self::Mask) -> Self {
-                b.into()
-            }
-
-            #[inline(always)]
-            fn rem(self, other: Self) -> Self {
-                ((self % other) + other) % other
-            }
 
             #[inline(always)]
             fn eq(self, other: Self) -> Self::Mask {
@@ -222,6 +239,7 @@ macro_rules! impl_float {
             fn ne(self, other: Self) -> Self::Mask {
                 self != other
             }
+
             #[inline(always)]
             fn lt(self, other: Self) -> Self::Mask {
                 self < other
@@ -239,15 +257,30 @@ macro_rules! impl_float {
                 self >= other
             }
 
+            // #[inline(always)]
+            // fn add(self, other: Self) -> Self {
+            //     self + other
+            // }
+            // #[inline(always)]
+            // fn sub(self, other: Self) -> Self {
+            //     self - other
+            // }
+            // #[inline(always)]
+            // fn mul(self, other: Self) -> Self {
+            //     self * other
+            // }
+            // #[inline(always)]
+            // fn div(self, other: Self) -> Self {
+            //     self / other
+            // }
+            // #[inline(always)]
+            // fn neg(self) -> Self {
+            //     -self
+            // }
             #[inline(always)]
-            fn select(cond: Self::Mask, then: Self, else_: Self) -> Self {
-                if cond {
-                    then
-                } else {
-                    else_
-                }
+            fn rem(self, other: Self) -> Self {
+                ((self % other) + other) % other
             }
-
             #[inline(always)]
             fn floor(self) -> Self {
                 self.floor()
@@ -312,41 +345,30 @@ macro_rules! impl_float {
             fn rad(self) -> Self {
                 self.to_radians()
             }
+
+            #[inline(always)]
+            fn from_f64(f: f64) -> Self {
+                f as $T
+            }
+            #[inline(always)]
+            fn from_mask(b: Self::Mask) -> Self {
+                b.into()
+            }
+
+            #[inline(always)]
+            fn if_(cond: Self::Mask, then: Self, else_: Self) -> Self {
+                if cond {
+                    then
+                } else {
+                    else_
+                }
+            }
         }
     };
 }
 
 impl_float!(f32);
 impl_float!(f64);
-
-macro_rules! apply {
-    ( $f:ident, $a:expr, $($i:literal),+) => {
-        [
-            $($a[$i].$f()),+
-        ]
-    };
-    ( $f:ident, $a:expr, $b:expr, $($i:literal),+) => {
-        [
-            $($a[$i].$f($b[$i])),+
-        ]
-    };
-    ( $f:ident, $a:expr, $b:expr, $c:expr, $($i:literal),+) => {
-        [
-            $($a[$i].$f($b[$i], $c[$i])),+
-        ]
-    };
-}
-macro_rules! apply_x8 {
-    ( $f:ident, $a:expr) => {
-        apply!($f, $a, 0, 1, 2, 3, 4, 5, 6, 7)
-    };
-    ( $f:ident, $a:expr, $b:expr) => {
-        apply!($f, $a, $b, 0, 1, 2, 3, 4, 5, 6, 7)
-    };
-    ( $f:ident, $a:expr, $b:expr, $c:expr) => {
-        apply!($f, $a, $b, $c, 0, 1, 2, 3, 4, 5, 6, 7)
-    };
-}
 
 impl Mask for f32x8 {
     const FALSE: Self = Self::ZERO;
@@ -374,13 +396,14 @@ impl Mask for f32x8 {
     }
 
     #[inline(always)]
-    fn select(cond: Self, then: Self, else_: Self) -> Self {
+    fn if_(cond: Self, then: Self, else_: Self) -> Self {
         cond.blend(else_, then)
     }
 }
 
 impl Float for f32x8 {
     type Mask = Self;
+
     const ZERO: Self = f32x8::ZERO;
     const ONE: Self = f32x8::ONE;
     const HALF: Self = f32x8::HALF;
@@ -388,12 +411,29 @@ impl Float for f32x8 {
     const PI: Self = f32x8::PI;
 
     #[inline(always)]
-    fn from_f64(f: f64) -> Self {
-        (f as f32).into()
+    fn eq(self, other: Self) -> Self::Mask {
+        self.cmp_eq(other)
     }
     #[inline(always)]
-    fn from_mask(b: Self::Mask) -> Self {
-        Self::blend(b, Self::ZERO, Self::ONE)
+    fn ne(self, other: Self) -> Self::Mask {
+        self.cmp_ne(other)
+    }
+
+    #[inline(always)]
+    fn lt(self, other: Self) -> Self::Mask {
+        self.cmp_lt(other)
+    }
+    #[inline(always)]
+    fn le(self, other: Self) -> Self::Mask {
+        self.cmp_le(other)
+    }
+    #[inline(always)]
+    fn gt(self, other: Self) -> Self::Mask {
+        self.cmp_gt(other)
+    }
+    #[inline(always)]
+    fn ge(self, other: Self) -> Self::Mask {
+        self.cmp_ge(other)
     }
 
     // #[inline(always)]
@@ -418,44 +458,16 @@ impl Float for f32x8 {
     // }
     #[inline(always)]
     fn rem(self, other: Self) -> Self {
-        apply_x8!(rem, self.to_array(), other.to_array()).into()
+        map8!(Float::rem, self.to_array(), other.to_array()).into()
     }
 
     #[inline(always)]
-    fn eq(self, other: Self) -> Self::Mask {
-        self.cmp_eq(other)
-    }
-    #[inline(always)]
-    fn ne(self, other: Self) -> Self::Mask {
-        self.cmp_ne(other)
-    }
-    #[inline(always)]
-    fn lt(self, other: Self) -> Self::Mask {
-        self.cmp_lt(other)
-    }
-    #[inline(always)]
-    fn le(self, other: Self) -> Self::Mask {
-        self.cmp_le(other)
-    }
-    #[inline(always)]
-    fn gt(self, other: Self) -> Self::Mask {
-        self.cmp_gt(other)
-    }
-    #[inline(always)]
-    fn ge(self, other: Self) -> Self::Mask {
-        self.cmp_ge(other)
-    }
-    #[inline(always)]
-    fn select(cond: Self::Mask, then: Self, else_: Self) -> Self {
-        cond.blend(else_, then)
-    }
-    #[inline(always)]
     fn floor(self) -> Self {
-        apply_x8!(floor, self.to_array()).into()
+        map8!(Float::floor, self.to_array()).into()
     }
     #[inline(always)]
     fn ceil(self) -> Self {
-        apply_x8!(ceil, self.to_array()).into()
+        map8!(Float::ceil, self.to_array()).into()
     }
     #[inline(always)]
     fn round(self) -> Self {
@@ -491,11 +503,11 @@ impl Float for f32x8 {
     }
     #[inline(always)]
     fn cbrt(self) -> Self {
-        apply_x8!(cbrt, self.to_array()).into()
+        map8!(Float::cbrt, self.to_array()).into()
     }
     #[inline(always)]
     fn hypot(self, other: Self) -> Self {
-        apply_x8!(hypot, self.to_array(), other.to_array()).into()
+        map8!(Float::hypot, self.to_array(), other.to_array()).into()
     }
     #[inline(always)]
     fn sin(self) -> Self {
@@ -513,183 +525,59 @@ impl Float for f32x8 {
     fn rad(self) -> Self {
         self.to_radians()
     }
+
+    #[inline(always)]
+    fn from_f64(f: f64) -> Self {
+        (f as f32).into()
+    }
+    #[inline(always)]
+    fn from_mask(b: Self::Mask) -> Self {
+        Self::blend(b, Self::ZERO, Self::ONE)
+    }
+    #[inline(always)]
+    fn if_(cond: Self::Mask, then: Self, else_: Self) -> Self {
+        cond.blend(else_, then)
+    }
 }
-
-macro_rules! trait_FloatN {
-    ($Name: ident, $N:literal, $($i:literal),+) => {
-        pub trait $Name<T: Float>:
-            Copy
-            + Clone
-            + PartialEq
-            + Index<usize, Output = T>
-            + From<[T; $N]>
-            + Into<[T; $N]>
-            + Default
-        {
-            #[inline(always)]
-            fn eq(self, other: Self) -> T::Mask {
-                and!(
-                    $(self[$i].eq(other[$i])),+
-                )
-
-            }
-
-            #[inline(always)]
-            fn ne(self, other: Self) -> T::Mask {
-                and!(
-                    $(self[$i].ne(other[$i])),+
-                )
-            }
-
-            #[inline(always)]
-            fn select(cond: T::Mask, then: Self, else_: Self) -> Self {
-                [
-                    $(T::select(cond, then[$i], else_[$i])),+
-                ]
-                .into()
-            }
-
-            #[inline(always)]
-            fn mincomp(self) -> T {
-                min!(
-                    $(self[$i]),+
-                )
-            }
-
-            #[inline(always)]
-            fn maxcomp(self) -> T {
-                max!(
-                    $(self[$i]),+
-                )
-            }
-        }
-    };
-}
-
-trait_FloatN!(Float2, 2, 0, 1);
-trait_FloatN!(Float3, 3, 0, 1, 2);
 
 impl<T: Float> Float2<T> for [T; 2] {}
 impl<T: Float> Float3<T> for [T; 3] {}
 
-// pub trait Float2<T: Float>:
-//     Copy + Clone + PartialEq + Index<usize, Output = T> + From<[T; 2]> + Into<[T; 2]> + Default
-// {
-//     #[inline(always)]
-//     fn eq(self, other: Self) -> T::Mask {
-//         self[0].eq(other[0]).and(self[1].eq(other[1]))
-//     }
+// macro_rules! _impl_FloatMath_for_array {
 
-//     #[inline(always)]
-//     fn ne(self, other: Self) -> T::Mask {
-//         self[0].ne(other[0]).and(self[1].ne(other[1]))
-//     }
-
-//     #[inline(always)]
-//     fn select(cond: T::Mask, then: Self, else_: Self) -> Self {
-//         [
-//             T::select(cond, then[0], else_[0]),
-//             T::select(cond, then[1], else_[1]),
-//         ]
-//         .into()
-//     }
-
-//     #[inline(always)]
-//     fn mincomp(self) -> T {
-//         T::min(self[0], self[1])
-//     }
-
-//     #[inline(always)]
-//     fn maxcomp(self) -> T {
-//         T::max(self[0], self[1])
-//     }
-// }
-
-// pub trait Float3<T: Float>:
-//     Copy + Clone + PartialEq + Index<usize, Output = T> + From<[T; 3]> + Into<[T; 3]> + Default
-// {
-//     #[inline(always)]
-//     fn eq(self, other: Self) -> T::Mask {
-//         self[0]
-//             .eq(other[0])
-//             .and(self[1].eq(other[1]))
-//             .and(self[2].eq(other[2]))
-//     }
-
-//     #[inline(always)]
-//     fn ne(self, other: Self) -> T::Mask {
-//         self[0]
-//             .ne(other[0])
-//             .and(self[1].ne(other[1]))
-//             .and(self[2].ne(other[2]))
-//     }
-
-//     #[inline(always)]
-//     fn select(cond: T::Mask, then: Self, else_: Self) -> Self {
-//         [
-//             T::select(cond, then[0], else_[0]),
-//             T::select(cond, then[1], else_[1]),
-//             T::select(cond, then[2], else_[2]),
-//         ]
-//         .into()
-//     }
-
-//     #[inline(always)]
-//     fn mincomp(self) -> T {
-//         T::min(self[0], self[1]).min(self[2])
-//     }
-
-//     #[inline(always)]
-//     fn maxcomp(self) -> T {
-//         T::max(self[0], self[1]).max(self[2])
-//     }
-// }
-
-// macro_rules! impl_for_float_array {
-//     ( $N:tt, $($f:ident(self $(, $a:ident)*),)*) => {
-//         impl<T: Float> Float for [T; $N] {
+// macro_rules! _impl_FloatMath_for_array {
+//     ($N:tt, $($f:ident(self $(, $a:ident)*),)*) => {
+//         impl<T: FloatConst> FloatConst for [T; $N] {
 //             const ZERO: Self = [T::ZERO; $N];
 //             const ONE: Self = [T::ONE; $N];
 //             const HALF: Self = [T::HALF; $N];
 //             const E: Self = [T::E; $N];
 //             const PI: Self = [T::PI; $N];
-
-//             #[inline(always)]
-//             fn from_f64(f:f64) -> Self {
-//                 [T::from_f64(f); $N]
-//             }
-
+//         }
+//         impl<T: Float> Float for [T; $N] {
 //             $(
 //                 #[inline(always)]
 //                 fn $f(self $(, $a:Self)*) -> Self {
-//                     map!($N, <T as Float>::$f, self $(, $a)*)
+//                     map_n!($N, T::$f, self $(, $a)*)
 //                 }
 //             )*
-
 //         }
 //     };
 // }
 
-// macro_rules! impl_for_float_array_n {
-//     ($N:tt) => {
-//         impl_for_float_array!(
+// macro_rules! impl_FloatMath_for_array {
+//     ($N: tt) => {
+//         _impl_FloatMath_for_array!(
 //             $N,
 //             add(self, other),
 //             sub(self, other),
 //             mul(self, other),
 //             div(self, other),
 //             rem(self, other),
+//             pow(self, n),
 //             neg(self),
-//             not(self),
-//             or(self, other),
-//             and(self, other),
-//             eq(self, other),
-//             ne(self, other),
-//             lt(self, other),
-//             le(self, other),
-//             gt(self, other),
-//             ge(self, other),
-//             select(self, then, else_),
+//             deg(self),
+//             rad(self),
 //             floor(self),
 //             ceil(self),
 //             round(self),
@@ -698,7 +586,6 @@ impl<T: Float> Float3<T> for [T; 3] {}
 //             ln(self),
 //             min(self, other),
 //             max(self, other),
-//             pow(self, n),
 //             sqrt(self),
 //             cbrt(self),
 //             hypot(self, other),
@@ -710,17 +597,34 @@ impl<T: Float> Float3<T> for [T; 3] {}
 //         );
 //     };
 // }
+// impl_FloatMath_for_array!(2);
+// impl_FloatMath_for_array!(3);
 
-// impl_for_float_array_n!(2);
-// impl_for_float_array_n!(3);
-// impl_for_float_array_n!(4);
+// macro_rules! impl_Eq_for_array {
+//     ($N:literal, $($i:literal),+) => {
+//         impl<T: Eq + Copy> Eq for [T; $N] {
+//             type Mask = T::Mask;
 
-fn test() {
-    // Float2::hello(Float2 {
-    //     x: 0.1_f32,
-    //     y: 1.0f32,
-    // });
-}
+//             #[inline(always)]
+//             fn eq(self, other: Self) -> Self::Mask {
+//                 and!(
+//                     $(self[$i].eq(other[$i])),+
+//                 )
+//             }
+
+//             #[inline(always)]
+//             fn ne(self, other: Self) -> Self::Mask {
+//                 and!(
+//                     $(self[$i].ne(other[$i])),+
+//                 )
+//             }
+//         }
+//     };
+// }
+
+// impl_Eq_for_array!(2, 0, 1);
+// impl_Eq_for_array!(3, 0, 1, 2);
+
 #[cfg(test)]
 mod tests {
     use super::*;

@@ -2,6 +2,7 @@
 pub mod builtins;
 pub mod compiler;
 pub mod context;
+mod ctx;
 pub mod error;
 pub mod evaler;
 pub mod float;
@@ -18,7 +19,7 @@ use std::fmt;
 
 pub struct Signature<'a> {
     name: &'a str,
-    args: &'a [op::ARG],
+    args: &'a [op::ICV],
 }
 
 impl<'a> fmt::Display for Signature<'a> {
@@ -34,7 +35,7 @@ impl<'a> fmt::Display for Signature<'a> {
         write!(f, ")")
     }
 }
-pub fn signature<'a>(name: &'a str, args: &'a [op::ARG]) -> Signature<'a> {
+pub fn signature<'a>(name: &'a str, args: &'a [op::ICV]) -> Signature<'a> {
     Signature { name, args }
 }
 
@@ -69,19 +70,28 @@ macro_rules! _map {
     };
 }
 
-#[macro_export]
 macro_rules! map {
     ($f:expr, $($a:expr),+$(,)?) => {
         $f($($a),+)
     };
 }
+pub(crate) use map;
+
+macro_rules! map1 {
+    ($f:expr, $($a:expr),+) => {
+        [
+            $f($($a[0]),+),
+        ]
+    };
+}
+pub(crate) use map1;
 
 macro_rules! map2 {
     ($f:expr, $($a:expr),+) => {
         [
             $f($($a[0]),+),
             $f($($a[1]),+),
-        ].into()
+        ]
     };
 }
 pub(crate) use map2;
@@ -92,7 +102,7 @@ macro_rules! map3 {
             $f($($a[0]),+),
             $f($($a[1]),+),
             $f($($a[2]),+),
-        ].into()
+        ]
     };
 }
 pub(crate) use map3;
@@ -104,10 +114,45 @@ macro_rules! map4 {
             $f($($a[1]),+),
             $f($($a[2]),+),
             $f($($a[3]),+),
-        ].into()
+        ]
     };
 }
 pub(crate) use map4;
+
+macro_rules! map8 {
+    ($f:expr, $($a:expr),+) => {
+        [
+            $f($($a[0]),+),
+            $f($($a[1]),+),
+            $f($($a[2]),+),
+            $f($($a[3]),+),
+            $f($($a[4]),+),
+            $f($($a[5]),+),
+            $f($($a[6]),+),
+            $f($($a[7]),+),
+        ]
+    };
+}
+pub(crate) use map8;
+
+macro_rules! map_n {
+    (1, $f:expr, $($a:expr),+) => {
+        crate::map1!($f, $($a),+)
+    };
+    (2, $f:expr, $($a:expr),+) => {
+        crate::map2!($f, $($a),+)
+    };
+    (3, $f:expr, $($a:expr),+) => {
+        crate::map3!($f, $($a),+)
+    };
+    (4, $f:expr, $($a:expr),+) => {
+        crate::map4!($f, $($a),+)
+    };
+    (8, $f:expr, $($a:expr),+) => {
+        crate::map8!($f, $($a),+)
+    };
+}
+pub(crate) use map_n;
 
 macro_rules! and {
     // Base case: when there's only one argument
@@ -155,34 +200,108 @@ pub(crate) use max;
 //     };
 // }
 // pub(crate) use max;
+// compile_fop(ADD(x:F2,y:F2))
+
+// macro_rules! arg2op {
+//     (F) => {
+//         Fop
+//     };
+//     (F2) => {
+//         F2op
+//     };
+//     (F3) => {
+//         F3op
+//     };
+//     (B) => {
+//         Bop
+//     };
+// }
+
+// macro_rules! compile_op {
+//     ($op:ident, $ename:ident ($($a:ident : $atype:ident),+ ), $fname:expr) => {
+//         match ($($a),+) {
+//             ($($atype::CONST($a)),+) => $op($op::CONST($fname($($a),+))),
+//             ($($a),+) => $op($op::$ename($($a),+)),
+//         }
+//     };
+// }
+
+// pub(crate) use compile_ty_op;
 
 macro_rules! compile_op {
-    ($ename:ident, $fname:ident, ($($a:ident),+ )) => {
-        #[allow(unused_parens)]
+    (:: $ename:ident ($($a:ident ),+ ), $fname:expr) => {
         match crate::max!($($a.optype()),+) {
             Type::F | Type::B => {
-                match ($($a.try_into().unwrap()),+) {
-                    ($(F::CONST($a)),+) => FOP(FOP::CONST(f64::$fname($($a),+))),
-                    ($($a),+) => FOP(FOP::$ename($($a),+)),
+                match ($($a.try_into()?),+) {
+                    ($(F::CONST($a)),+) => Fop(Fop::CONST($fname($($a),+))),
+                    ($($a),+) => Fop(Fop::$ename($($a),+)),
                 }
             }
             Type::F2 => {
-                match ($($a.try_into().unwrap()),+) {
-                    ($(F2::CONST($a)),+) => FOP2(FOP2::CONST(map2!(f64::$fname, $($a),+))),
-                    ($($a),+) => FOP2(FOP2::$ename($($a),+)),
+                match ($($a.try_into()?),+) {
+                    ($(F2::CONST($a)),+) => F2op(F2op::CONST(map2!($fname, $($a),+))),
+                    ($($a),+) => F2op(F2op::$ename($($a),+)),
                 }
             }
             Type::F3=> {
                 match ($($a.try_into()?),+) {
-                    ($(F3::CONST($a)),+) => FOP3(FOP3::CONST(map3!(f64::$fname, $($a),+))),
-                    ($($a),+) => FOP3(FOP3::$ename($($a),+)),
+                    ($(F3::CONST($a)),+) => F3op(F3op::CONST(map3!($fname, $($a),+))),
+                    ($($a),+) => F3op(F3op::$ename($($a),+)),
                 }
             }
+        }
+    };
+    ($op:ident :: $ename:ident ($($a:ident : $atype:ident),+ ), $fname:expr) => {
+        match ($($a.try_into()?),+) {
+            ($($atype::CONST($a)),+) => $op($op::CONST($fname($($a),+))),
+            ($($a),+) => $op($op::$ename($($a),+)),
         }
     };
 }
 
 pub(crate) use compile_op;
+
+// macro_rules! create_FN {
+//     (
+//         $(Fop@ :: $ename:ident ($($a:ident),+ ) {$fname:expr})*
+//         $(Fop :: $f_ename:ident ($($f_a:ident : $f_atype:ident),+ ) {$f_fname:expr})*
+//         $(F2op :: $f2_ename:ident ($($f2_a:ident : $f2_atype:ident),+ ) {$f2_fname:expr})*
+//         $(F3op :: $f3_ename:ident ($($f3_a:ident : $f3_atype:ident),+ ) {$f3_fname:expr})*
+//     ) => {
+//         macro_rules! _type {
+//             ($name: ident, $T: ty)=>{
+//                 $T
+//             }
+//         }
+//         pub enum FN {
+//             $($ename($(_type!($a, F)),*),)*
+//             $($f_ename($(_type!($f_a, $f_atype)),*),)*
+//         }
+//         pub enum FN2 {
+//             $($ename($(_type!($a, F2)),*)),*
+//             $($f2_ename($(_type!($f2_a, $f2_atype)),*),)*
+//         }
+//         pub enum FN3 {
+//             $($ename($(_type!($a, F3)),*)),*
+//             $($f3_ename($(_type!($f3_a, $f3_atype)),*),)*
+//         }
+
+//         #[inline]
+//         pub fn dispatch_func(name: &str, str_arg: Option<&str>, args: &[ICV]) -> Result<OP,Error>{
+//             paste!{
+//                 match (name, str_arg, args) {
+//                     $((stringify!([<$ename:lower>]), None, [$($a),*]) => { Ok(compile_fn!(Fop@ :: $ename ($($a),*), $fname)) })*
+//                     $((stringify!([<$f_ename:lower>]), None, [$($f_a),*]) => { Ok(compile_fn!(Fop :: $f_ename ($($f_a: $f_atype),*), $f_fname)) })*
+//                     $((stringify!([<$f2_ename:lower>]), None, [$($f2_a),*]) => { Ok(compile_fn!(F2op :: $f2_ename ($($f2_a: $f2_atype),*), $f2_fname)) })*
+//                     $((stringify!([<$f3_ename:lower>]), None, [$($f3_a),*]) => { Ok(compile_fn!(F3op :: $f3_ename ($($f3_a: $f3_atype),*), $f3_fname)) })*
+
+//                     _ => Err(Error::Unreachable),
+//                 }
+//             }
+//         }
+
+//     };
+// }
 
 macro_rules! compile_stdfn {
     ($ename:ident, $fname:ident, ($($a:ident),+ )) => {
@@ -190,20 +309,20 @@ macro_rules! compile_stdfn {
         match crate::max!($($a.optype()),+) {
             Type::F | Type::B => {
                 match ($($a.try_into().ok()?),+) {
-                    ($(F::CONST($a)),+) => FOP(FOP::CONST(f64::$fname($($a),+))),
-                    ($($a),+) => FOP(FOP::STDFN(STDFN::$ename($($a),+))),
+                    ($(F::CONST($a)),+) => Fop(Fop::CONST(f64::$fname($($a),+))),
+                    ($($a),+) => Fop(Fop::FN(Ffn::$ename($($a),+))),
                 }
             }
             Type::F2 => {
                 match ($($a.try_into().ok()?),+) {
-                    ($(F2::CONST($a)),+) => FOP2(FOP2::CONST(map2!(f64::$fname, $($a),+))),
-                    ($($a),+) => FOP2(FOP2::STDFN(STDFN2::$ename($($a),+))),
+                    ($(F2::CONST($a)),+) => F2op(F2op::CONST(map2!(f64::$fname, $($a),+))),
+                    ($($a),+) => F2op(F2op::FN(F2fn::$ename($($a),+))),
                 }
             }
             Type::F3=> {
                 match ($($a.try_into().ok()?),+) {
-                    ($(F3::CONST($a)),+) => FOP3(FOP3::CONST(map3!(f64::$fname, $($a),+))),
-                    ($($a),+) => FOP3(FOP3::STDFN(STDFN3::$ename($($a),+))),
+                    ($(F3::CONST($a)),+) => F3op(F3op::CONST(map3!(f64::$fname, $($a),+))),
+                    ($($a),+) => F3op(F3op::FN(F3fn::$ename($($a),+))),
                 }
             }
         }
@@ -219,7 +338,7 @@ pub(crate) use compile_stdfn;
 //             &[FICV(x)] => Some(F(F::FUNC(F_F(T::$f, x)))),
 //             &[UICV(UICV::CONST(c))] => Some(F2(F2::CONST(crate::map2!(f32::$f, c)))),
 //             &[UICV(x)] => unimplemented!(),
-//             // &[UICV(x)] => Some(FOP2(UFUNC(U_U(T::$f, x)))),
+//             // &[UICV(x)] => Some(F2op(UFUNC(U_U(T::$f, x)))),
 //             _ => None,
 //         }
 //     };
@@ -229,8 +348,8 @@ pub(crate) use compile_stdfn;
 // macro_rules! op_func2 {
 //     ($f:ident, $args: expr) => {
 //         match $args {
-//             &[FICV(FICV::FCONST(c0)), FICV(FICV::FCONST(c1))] => Some(FOP(FCONST(f32::$f(c0, c1)))),
-//             &[FICV(x0), FICV(x1)] => Some(FOP(FFUNC(F_FF(T::$f, x0, x1)))),
+//             &[FICV(FICV::FCONST(c0)), FICV(FICV::FCONST(c1))] => Some(Fop(FCONST(f32::$f(c0, c1)))),
+//             &[FICV(x0), FICV(x1)] => Some(Fop(FFUNC(F_FF(T::$f, x0, x1)))),
 //             &[x0 @ (FICV(_) | UICV(_)), x1 @ (UICV(_) | FICV(_))] => {
 //                 let x0 = x0.into();
 //                 let x1 = x1.into();
@@ -240,7 +359,7 @@ pub(crate) use compile_stdfn;
 //                     }
 //                     _ => unimplemented!(), //UFUNC(U_UU(T::$f, x0, x1)),
 //                 };
-//                 Some(FOP2(uop))
+//                 Some(F2op(uop))
 //             }
 //             _ => None,
 //         }
@@ -280,11 +399,11 @@ let resolver = expre::parse()
 
 //             #[derive(Debug, Clone)]
 //             $pub struct $module_name {
-//                 pub vars: IndexMap<String,ARG>,
+//                 pub vars: IndexMap<String,ICV>,
 //             }
 
 //             impl $module_name {
-//                 pub fn new(vars:IndexMap<String,ARG>)-> Self {
+//                 pub fn new(vars:IndexMap<String,ICV>)-> Self {
 //                     Self {vars}
 //                 }
 //             }
@@ -294,20 +413,20 @@ let resolver = expre::parse()
 //                 type FN2 = [<$module_name F2>];
 
 //                 #[inline]
-//                 fn dispatch_var(&self, name: &str) -> Option<&ARG> {
+//                 fn dispatch_var(&self, name: &str) -> Option<&ICV> {
 //                     self.vars.get(name)
 //                 }
 
 //                 #[inline]
-//                 fn dispatch_fn(&self, name: &str, args: &[ARG]) -> Option<OP<Self::FN, Self::FN2>>{
+//                 fn dispatch_fn(&self, name: &str, args: &[ICV]) -> Option<OP<Self::FN, Self::FN2>>{
 //                     match (name, args) {
-//                         $(($fstr_, &[$($fargty_($fargname_)),*]) => {Some(FOP(FOP::FN(Self::FN::$fname_($($farg_.into()),*))))})*
-//                         $(("$fname", &[$($fargty(F::CONST($fargname))),*]) => {Some(FOP(FOP::CONST(f64::$fname($($fargname),*))))})*
-//                         $(("$fname", &[$($fargty($fargname)),*]) => {Some(FOP(FOP::FN(Self::FN::$fname($($farg.into()),*))))})*
+//                         $(($fstr_, &[$($fargty_($fargname_)),*]) => {Some(Fop(Fop::FN(Self::Ffn::$fname_($($farg_.into()),*))))})*
+//                         $(("$fname", &[$($fargty(F::CONST($fargname))),*]) => {Some(Fop(Fop::CONST(f64::$fname($($fargname),*))))})*
+//                         $(("$fname", &[$($fargty($fargname)),*]) => {Some(Fop(Fop::FN(Self::Ffn::$fname($($farg.into()),*))))})*
 
-//                         $(($ustr_, &[$($uargty_($uargname_)),*]) => {Some(FOP2(FOP2::FN(Self::FN2::$uname_($($uarg_.into()),*))))})*
-//                         $(($ustr, &[$($uargname @ (F(F::CONST(_)) | F2(F2::CONST(_)))),*]) => {Some(FOP2(FOP2::CONST(<[f64;2]>::$uname($($uargname.into()),*))))})*
-//                         $(($ustr, &[$($uargty($uargname)),*]) => {Some(FOP2(FOP2::FN(Self::FN2::$uname($($uarg.into()),*))))})*
+//                         $(($ustr_, &[$($uargty_($uargname_)),*]) => {Some(F2op(F2op::FN(Self::F2fn::$uname_($($uarg_.into()),*))))})*
+//                         $(($ustr, &[$($uargname @ (F(F::CONST(_)) | F2(F2::CONST(_)))),*]) => {Some(F2op(F2op::CONST(<[f64;2]>::$uname($($uargname.into()),*))))})*
+//                         $(($ustr, &[$($uargty($uargname)),*]) => {Some(F2op(F2op::FN(Self::F2fn::$uname($($uarg.into()),*))))})*
 //                         _ => None,
 //                     }
 //                 }
@@ -366,7 +485,7 @@ let resolver = expre::parse()
 
 //             #[derive(Debug, Clone)]
 //             $pub struct $module_name {
-//                 pub vars: IndexMap<String,ARG>,
+//                 pub vars: IndexMap<String,ICV>,
 //             }
 
 //             impl $module_name {
@@ -374,7 +493,7 @@ let resolver = expre::parse()
 //                     Self {vars: IndexMap::new()}
 //                 }
 
-//                 pub fn with_vars(vars:IndexMap<String,ARG>)-> Self {
+//                 pub fn with_vars(vars:IndexMap<String,ICV>)-> Self {
 //                     Self {vars}
 //                 }
 //             }
@@ -384,20 +503,20 @@ let resolver = expre::parse()
 //                 type FN2 = [<$module_name F2>];
 
 //                 #[inline]
-//                 fn dispatch_var(&self, name: &str) -> Option<&ARG> {
+//                 fn dispatch_var(&self, name: &str) -> Option<&ICV> {
 //                     self.vars.get(name)
 //                 }
 
 //                 #[inline]
-//                 fn dispatch_fn(&self, name: &str, args: &[ARG]) -> Option<OP<Self::FN, Self::FN2>>{
+//                 fn dispatch_fn(&self, name: &str, args: &[ICV]) -> Option<OP<Self::FN, Self::FN2>>{
 //                     match (name, args) {
-//                         $((stringify!($fname_), &[$($fargty_($fargname_)),*]) => {Some(FOP(FOP::FN(Self::FN::$fname2_($($fargname2_),*))))})*
-//                         $((stringify!($fname), &[$(ref $fargname @ (F(F::CONST(_)) | $fargty($fargty::CONST(_)))),*]) => {Some(FOP(FOP::CONST(f64::$fname($($fargname.clone().try_into().unwrap()),*))))})*
-//                         $((stringify!($fname), &[$($fargty($fargname)),*]) => {Some(FOP(FOP::FN(Self::FN::$fname($($fargname),*))))})*
+//                         $((stringify!($fname_), &[$($fargty_($fargname_)),*]) => {Some(Fop(Fop::FN(Self::Ffn::$fname2_($($fargname2_),*))))})*
+//                         $((stringify!($fname), &[$(ref $fargname @ (F(F::CONST(_)) | $fargty($fargty::CONST(_)))),*]) => {Some(Fop(Fop::CONST(f64::$fname($($fargname.clone().try_into().unwrap()),*))))})*
+//                         $((stringify!($fname), &[$($fargty($fargname)),*]) => {Some(Fop(Fop::FN(Self::Ffn::$fname($($fargname),*))))})*
 
-//                         $((stringify!($uname_), &[$($uargty_($uargname_)),*]) => {Some(FOP(FOP::FN(Self::FN::$uname2_($($uargname2_),*))))})*
-//                         $((stringify!($uname), &[$(ref $uargname @ (F(F::CONST(_)) | $uargty($uargty::CONST(_)))),*]) => {Some(FOP2(FOP2::CONST(<[f64;2]>::$uname($($uargname.clone().try_into().unwrap()),*))))})*
-//                         $((stringify!($uname), &[$($uargty($uargname)),*]) => {Some(FOP2(FOP2::FN(Self::FN2::$uname($($uargname),*))))})*
+//                         $((stringify!($uname_), &[$($uargty_($uargname_)),*]) => {Some(Fop(Fop::FN(Self::Ffn::$uname2_($($uargname2_),*))))})*
+//                         $((stringify!($uname), &[$(ref $uargname @ (F(F::CONST(_)) | $uargty($uargty::CONST(_)))),*]) => {Some(F2op(F2op::CONST(<[f64;2]>::$uname($($uargname.clone().try_into().unwrap()),*))))})*
+//                         $((stringify!($uname), &[$($uargty($uargname)),*]) => {Some(F2op(F2op::FN(Self::F2fn::$uname($($uargname),*))))})*
 
 //                         _ => None,
 //                     }
@@ -489,3 +608,8 @@ let resolver = expre::parse()
 //         }
 //     };
 // }
+
+//                 F::FIT01(x:F, newmin:F, newmax:F) {Float::fit01};
+//                 F::CLAMP(x:F, min:F, max:F) {Float::clamp};
+//                 F2::FLOOR(x:F2) {Float2::floor};
+//                 F3::CEIL(x:F2) {Float3::ceil};

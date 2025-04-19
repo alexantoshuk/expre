@@ -1,6 +1,6 @@
 use crate::compiler::Expression;
 use crate::error::Error;
-use crate::float::Float;
+use crate::float::*;
 use crate::op::*;
 use bytemuck::Pod;
 use std::fmt::Debug;
@@ -11,7 +11,7 @@ pub trait Module: Sized + Clone + Debug {
         None
     }
 
-    fn dispatch_func(&self, _name: &str, _string: Option<&str>, _args: &[ARG]) -> Option<OP> {
+    fn dispatch_func(&self, _name: &str, _string: Option<&str>, _args: &[ICV]) -> Option<OP> {
         None
     }
 }

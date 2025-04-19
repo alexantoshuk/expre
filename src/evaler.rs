@@ -14,13 +14,13 @@ pub enum Value<T> {
     F3([T; 3]),
 }
 
-pub trait Inner<T> {
-    fn inner(self) -> T;
+pub trait IntoInner<T> {
+    fn into_inner(self) -> T;
 }
 
-impl<T> Inner<T> for Value<T> {
+impl<T> IntoInner<T> for Value<T> {
     #[inline]
-    fn inner(self) -> T {
+    fn into_inner(self) -> T {
         match self {
             Self::F(x) => x,
             Self::F2([x, _]) => x,
@@ -29,9 +29,9 @@ impl<T> Inner<T> for Value<T> {
     }
 }
 
-impl<T> Inner<[T; 1]> for Value<T> {
+impl<T> IntoInner<[T; 1]> for Value<T> {
     #[inline]
-    fn inner(self) -> [T; 1] {
+    fn into_inner(self) -> [T; 1] {
         match self {
             Self::F(x) => [x],
             Self::F2([x, _]) => [x],
@@ -40,9 +40,9 @@ impl<T> Inner<[T; 1]> for Value<T> {
     }
 }
 
-impl<T: Float> Inner<[T; 2]> for Value<T> {
+impl<T: Float> IntoInner<[T; 2]> for Value<T> {
     #[inline]
-    fn inner(self) -> [T; 2] {
+    fn into_inner(self) -> [T; 2] {
         match self {
             Self::F2(xy) => xy,
             Self::F(x) => [x, T::ZERO],
@@ -51,9 +51,9 @@ impl<T: Float> Inner<[T; 2]> for Value<T> {
     }
 }
 
-impl<T: Float> Inner<[T; 3]> for Value<T> {
+impl<T: Float> IntoInner<[T; 3]> for Value<T> {
     #[inline]
-    fn inner(self) -> [T; 3] {
+    fn into_inner(self) -> [T; 3] {
         match self {
             Self::F3(xyz) => xyz,
             Self::F(x) => [x, T::ZERO, T::ZERO],
@@ -82,10 +82,10 @@ where
         CTX: Context,
     {
         match self.ops.last().unwrap() {
-            FOP(o) => Value::F(o.eval(self, ctx)),
-            FOP2(o) => Value::F2(o.eval(self, ctx)),
-            FOP3(o) => Value::F3(o.eval(self, ctx)),
-            BOP(o) => Value::F(Float::from_mask(o.eval(self, ctx))),
+            Fop(o) => Value::F(o.eval(self, ctx)),
+            F2op(o) => Value::F2(o.eval(self, ctx)),
+            F3op(o) => Value::F3(o.eval(self, ctx)),
+            Bop(o) => Value::F(Float::from_mask(o.eval(self, ctx))),
         }
     }
 }
@@ -100,10 +100,10 @@ where
     #[inline]
     fn eval(&self, ex: &Expression<M>, ctx: &CTX) -> Self::Output {
         match self {
-            Self::CONST(c) => <CTX::T as Float>::Mask::from_bool(*c),
-            Self::VAR(GLOBAL(offset)) => ctx.f(*offset).to_mask(),
+            Self::CONST(c) => Self::Output::from_bool(*c),
+            Self::VAR(offset) => ctx.f(*offset).to_mask(),
             Self::I(i) => match ex.get(*i) {
-                BOP(o) => o.eval(ex, ctx),
+                Bop(o) => o.eval(ex, ctx),
                 _ => unreachable!(),
             },
             _ => unimplemented!(),
@@ -121,9 +121,9 @@ where
     fn eval(&self, ex: &Expression<M>, ctx: &CTX) -> Self::Output {
         match self {
             Self::CONST(c) => CTX::T::from_f64(*c),
-            Self::VAR(GLOBAL(offset)) => ctx.f(*offset),
+            Self::VAR(offset) => ctx.f(*offset),
             Self::I(i) => match ex.get(*i) {
-                FOP(o) => o.eval(ex, ctx),
+                Fop(o) => o.eval(ex, ctx),
                 _ => unreachable!(),
             },
             _ => unimplemented!(),
@@ -141,9 +141,9 @@ where
     fn eval(&self, ex: &Expression<M>, ctx: &CTX) -> Self::Output {
         match self {
             Self::CONST([x, y]) => [CTX::T::from_f64(*x), CTX::T::from_f64(*y)],
-            Self::VAR(GLOBAL(offset)) => ctx.f2(*offset),
+            Self::VAR(offset) => ctx.f2(*offset),
             Self::I(i) => match ex.get(*i) {
-                FOP2(o) => o.eval(ex, ctx),
+                F2op(o) => o.eval(ex, ctx),
                 _ => unreachable!(),
             },
             Self::F(f) => [f.eval(ex, ctx); 2],
@@ -166,9 +166,9 @@ where
                 CTX::T::from_f64(*y),
                 CTX::T::from_f64(*z),
             ],
-            Self::VAR(GLOBAL(offset)) => ctx.f3(*offset),
+            Self::VAR(offset) => ctx.f3(*offset),
             Self::I(i) => match ex.get(*i) {
-                FOP3(o) => o.eval(ex, ctx),
+                F3op(o) => o.eval(ex, ctx),
                 _ => unreachable!(),
             },
             Self::F(f) => [f.eval(ex, ctx); 3],
@@ -177,7 +177,7 @@ where
     }
 }
 
-impl<M, CTX> Eval<M, CTX> for BOP
+impl<M, CTX> Eval<M, CTX> for Bop
 where
     M: Module,
     CTX: Context,
@@ -185,7 +185,7 @@ where
     type Output = <CTX::T as Float>::Mask;
 
     #[inline]
-    fn eval(&self, ex: &Expression<M>, ctx: &CTX) -> <CTX::T as Float>::Mask {
+    fn eval(&self, ex: &Expression<M>, ctx: &CTX) -> Self::Output {
         match self {
             Self::EQ(l, r) => Float::eq(l.eval(ex, ctx), r.eval(ex, ctx)),
             Self::NE(l, r) => Float::ne(l.eval(ex, ctx), r.eval(ex, ctx)),
@@ -206,7 +206,7 @@ where
             Self::AND(l, r) => Mask::and(l.eval(ex, ctx), r.eval(ex, ctx)),
 
             Self::IF(b, then, els) => {
-                Mask::select(b.eval(ex, ctx), then.eval(ex, ctx), els.eval(ex, ctx))
+                Mask::if_(b.eval(ex, ctx), then.eval(ex, ctx), els.eval(ex, ctx))
             }
             Self::CONST(c) => Mask::from_bool(*c),
             _ => unreachable!(),
@@ -214,7 +214,7 @@ where
     }
 }
 
-impl<M, CTX> Eval<M, CTX> for FOP
+impl<M, CTX> Eval<M, CTX> for Fop
 where
     M: Module,
     CTX: Context,
@@ -223,24 +223,24 @@ where
     #[inline]
     fn eval(&self, ex: &Expression<M>, ctx: &CTX) -> Self::Output {
         match self {
-            Self::MUL(l, r) => l.eval(ex, ctx) * r.eval(ex, ctx),
+            Self::MUL(l, r) => Mul::mul(l.eval(ex, ctx), r.eval(ex, ctx)),
             Self::ADD(l, r) => Add::add(l.eval(ex, ctx), r.eval(ex, ctx)),
             Self::NEG(a) => Neg::neg(a.eval(ex, ctx)),
             Self::INV(a) => Float::recip(a.eval(ex, ctx)),
             Self::REM(l, r) => Float::rem(l.eval(ex, ctx), r.eval(ex, ctx)),
             Self::POW(l, r) => Float::pow(l.eval(ex, ctx), r.eval(ex, ctx)),
             Self::IF(b, then, els) => {
-                Float::select(b.eval(ex, ctx), then.eval(ex, ctx), els.eval(ex, ctx))
+                Float::if_(b.eval(ex, ctx), then.eval(ex, ctx), els.eval(ex, ctx))
             }
-            Self::STDFN(f) => f.eval(ex, ctx),
+            // Self::FN(f) => f.eval(ex, ctx),
             Self::CONST(c) => Float::from_f64(*c),
-            Self::VAR(GLOBAL(offset)) => ctx.f(*offset),
+            Self::VAR(offset) => ctx.f(*offset),
             _ => unimplemented!(),
         }
     }
 }
 
-impl<M, CTX> Eval<M, CTX> for FOP2
+impl<M, CTX> Eval<M, CTX> for F2op
 where
     M: Module,
     CTX: Context,
@@ -249,25 +249,24 @@ where
     #[inline]
     fn eval(&self, ex: &Expression<M>, ctx: &CTX) -> Self::Output {
         match self {
-            Self::NEW([x, y]) => [x.eval(ex, ctx), y.eval(ex, ctx)],
-            Self::ADD(l, r) => map2!(Add::add, l.eval(ex, ctx), r.eval(ex, ctx)),
             Self::MUL(l, r) => map2!(Mul::mul, l.eval(ex, ctx), r.eval(ex, ctx)),
-            Self::POW(l, r) => map2!(Float::pow, l.eval(ex, ctx), r.eval(ex, ctx)),
-            Self::REM(l, r) => map2!(Float::rem, l.eval(ex, ctx), r.eval(ex, ctx)),
+            Self::ADD(l, r) => map2!(Add::add, l.eval(ex, ctx), r.eval(ex, ctx)),
             Self::NEG(a) => map2!(Neg::neg, a.eval(ex, ctx)),
             Self::INV(a) => map2!(Float::recip, a.eval(ex, ctx)),
+            Self::REM(l, r) => map2!(Float::rem, l.eval(ex, ctx), r.eval(ex, ctx)),
+            Self::POW(l, r) => map2!(Float::pow, l.eval(ex, ctx), r.eval(ex, ctx)),
             Self::IF(b, then, els) => {
-                Float2::select(b.eval(ex, ctx), then.eval(ex, ctx), els.eval(ex, ctx))
+                Float2::if_(b.eval(ex, ctx), then.eval(ex, ctx), els.eval(ex, ctx))
             }
-            Self::STDFN(f) => f.eval(ex, ctx),
+            // Self::FN(f) => f.eval(ex, ctx),
             Self::CONST(c) => map2!(Float::from_f64, c),
-            Self::VAR(GLOBAL(offset)) => ctx.f2(*offset),
+            Self::VAR(offset) => ctx.f2(*offset),
             _ => unimplemented!(),
         }
     }
 }
 
-impl<M, CTX> Eval<M, CTX> for FOP3
+impl<M, CTX> Eval<M, CTX> for F3op
 where
     M: Module,
     CTX: Context,
@@ -284,11 +283,11 @@ where
             Self::NEG(a) => map3!(Neg::neg, a.eval(ex, ctx)),
             Self::INV(a) => map3!(Float::recip, a.eval(ex, ctx)),
             Self::IF(b, then, els) => {
-                Float3::select(b.eval(ex, ctx), then.eval(ex, ctx), els.eval(ex, ctx))
+                Float3::if_(b.eval(ex, ctx), then.eval(ex, ctx), els.eval(ex, ctx))
             }
-            Self::STDFN(f) => f.eval(ex, ctx),
+            // Self::FN(f) => f.eval(ex, ctx),
             Self::CONST(c) => map3!(Float::from_f64, c),
-            Self::VAR(GLOBAL(offset)) => ctx.f3(*offset),
+            Self::VAR(offset) => ctx.f3(*offset),
             _ => unimplemented!(),
         }
     }
@@ -302,8 +301,8 @@ mod test {
     use crate::parser::Ast;
     #[test]
     fn test_eval() {
-        let expr_str = "a=id; a += maxcomp([id,5]) + a+id ; a";
-        // let expr_str = "a=id;a = a+id+a+id;a";
+        // let expr_str = "a=id; a += maxcomp([id,5]) + a+id ; a";
+        let expr_str = "a=id;b=5+a;c=a+b;6+b";
         // let expr_str = "a=id+id+id+id;a";
         // macro_rules! apply_context {
         //     (struct $NAME: ident { }) => {};
@@ -314,35 +313,35 @@ mod test {
 
         // struct Data {
         //     buffer: Box<u8>,
-        //     offsets: IndexMap<String, ARG>,
+        //     offsets: IndexMap<String, ICV>,
         // }
 
         // impl Module for Data {
         //     type STDFN = ();
         //     type FN2 = ();
-        //     type FOP = f32;
+        //     type Fop = f32;
         //     fn var(name: &str) -> Option<OP<Self>> {
         //         match name {
-        //             "id" => Some(FOP(FOP::VAR(0))),
-        //             "b" => Some(FOP(FOP::VAR(1))),
-        //             "uv" => Some(FOP2(FOP2::VAR(2))),
+        //             "id" => Some(Fop(Fop::VAR(0))),
+        //             "b" => Some(Fop(Fop::VAR(1))),
+        //             "uv" => Some(F2op(F2op::VAR(2))),
         //             _ => None,
         //         }
         //     }
         // }
         #[derive(Clone, Debug)]
         pub struct Builtins {
-            // pub vars: IndexMap<String, ARG>,
+            // pub vars: IndexMap<String, ICV>,
         }
 
         impl Module for Builtins {
             #[inline]
             fn dispatch_ident(&self, name: &str) -> Option<OP> {
                 match name {
-                    "id" => Some(FOP(FOP::VAR(GLOBAL(0)))),
-                    "b" => Some(FOP(FOP::VAR(GLOBAL(1)))),
-                    "uv" => Some(FOP2(FOP2::VAR(GLOBAL(2)))),
-                    "pid" => Some(FOP(FOP::CONST(1.0))),
+                    "id" => Some(Fop(Fop::VAR(0))),
+                    "b" => Some(Fop(Fop::VAR(1))),
+                    "uv" => Some(F2op(F2op::VAR(2))),
+                    "pid" => Some(Fop(Fop::CONST(1.0))),
                     _ => None,
                 }
             }
@@ -376,7 +375,7 @@ mod test {
         //
         //
         // println!("size of OP: {}", std::mem::size_of::<OP<MyModule>>());
-        println!("size of ARG: {}", std::mem::size_of::<ARG>());
+        println!("size of ICV: {}", std::mem::size_of::<ICV>());
         println!("size of F: {}", std::mem::size_of::<F>());
         println!("size of F2: {}", std::mem::size_of::<F2>());
         let mut ast = Ast::new();
@@ -440,7 +439,7 @@ mod test {
 
         // let v = ex.eval();
         // println!("{:?}", ex);
-        // assert_eq!(Value::FOP(5807.369321620128), v);
+        // assert_eq!(Value::Fop(5807.369321620128), v);
     }
 }
 
@@ -450,9 +449,9 @@ mod test {
 //             F("sin", x:F) => sin(x),
 //             F("cos", x:F) => cos(x),
 //             F("clamp", x:F, min:F, max:F) => clamp(x,min,max),
-//             // ("rand", min:FOP, max:FOP, seed:FOP) => rand(min,max,seed),
-//             // ("rand", min:FOP, max:FOP) => rand(min,max,var("seed")),
-//             // ("rand", seed:FOP) => rand(0.0,1.0,seed),
+//             // ("rand", min:Fop, max:Fop, seed:Fop) => rand(min,max,seed),
+//             // ("rand", min:Fop, max:Fop) => rand(min,max,var("seed")),
+//             // ("rand", seed:Fop) => rand(0.0,1.0,seed),
 //             // ("rand") => rand(0.0,1.0,var("seed")),
 //             F("clamp", x:F) => clamp(x, 0.0, F::VAR(1)),
 //         },
@@ -510,3 +509,13 @@ impl UUU for f64 {
         x[0]
     }
 }
+
+// let ctx_map = CtxMap::new([("id", F), ("P", F3), ("uv", F2)]);
+// let c = expre::Expre::new();
+// let ctx = Ctx::view(&ctx_map, &my_slice);
+// let mut ctx = Ctx::new(&ctx_map);
+
+// let resolver = c.compile(&ctx_map, "id + PI -124 +sin(P)");
+// let result = resolver.eval(&ctx);
+//
+//

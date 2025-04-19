@@ -36,7 +36,6 @@ use crate::parser::*;
 use crate::tokens::{self, *};
 use crate::{compile_op, map2, map3, signature};
 use std::fmt::{self, Debug};
-use std::ops::Add;
 use std::usize;
 
 impl Ast {
@@ -57,16 +56,10 @@ pub trait Compiler<M: Module> {
     fn compile(&self, ast: &Ast, ex: &mut Expression<M>) -> Result<OP, Error>;
 }
 
-pub struct Resolver<'e, 'm, M: Module, CTX: Context> {
-    expr: &'e Expression<'m, M>,
-    start: usize,
-    locals_buf: Buffer<CTX::T>,
-    ctx: CTX,
-}
 /// `Expression` is where `compile()` results are stored.
 pub struct Expression<'m, M: Module> {
     module: &'m M,
-    locals: IndexMap<String, ARG>,
+    locals: IndexMap<String, ICV>,
     pub(crate) ops: Vec<OP>,
 }
 
@@ -88,18 +81,27 @@ impl<'m, M: Module> Expression<'m, M> {
                 Statement::OpAssign(name, aop, ecv) => match aop {
                     Assign => {
                         let op = ecv.compile(ast, self)?;
-                        let arg = op.into_arg(self);
-                        self.locals.insert(name.into(), arg);
+                        let icv = op.into_icv(self);
+                        self.locals.insert(name.into(), icv);
                     }
                     AddAssign => {
                         let ex = Expr(ECV(ECV::Var(name.clone())), vec![(Add, ECV(ecv.clone()))]);
                         let op = ex.compile(ast, self)?;
-                        let arg = op.into_arg(self);
-                        self.locals.insert(name.into(), arg);
+                        let icv = op.into_icv(self);
+                        self.locals.insert(name.into(), icv);
                     }
                     _ => unimplemented!(),
                 },
             }
+        }
+        let last = ast.exprs.last().unwrap();
+        let op = last.compile(ast, self)?;
+        match op {
+            Fop(Fop::I(i)) => self.ops.truncate(i + 1),
+            F2op(F2op::I(i)) => self.ops.truncate(i + 1),
+            F3op(F3op::I(i)) => self.ops.truncate(i + 1),
+            Bop(Bop::I(i)) => self.ops.truncate(i + 1),
+            _ => self.ops.push(op),
         }
 
         Ok(())
@@ -143,132 +145,132 @@ impl<'m, M: Module> Expression<'m, M> {
     }
 }
 
-pub trait IntoArg<M: Module, T>: Sized {
-    fn into_arg(self, ex: &mut Expression<M>) -> T;
+pub trait IntoICV<M: Module, T>: Sized {
+    fn into_icv(self, ex: &mut Expression<M>) -> T;
 }
 
-impl<M: Module> IntoArg<M, ARG> for OP {
+impl<M: Module> IntoICV<M, ICV> for OP {
     #[inline]
-    fn into_arg(self, ex: &mut Expression<M>) -> ARG {
+    fn into_icv(self, ex: &mut Expression<M>) -> ICV {
         match self {
-            FOP(f) => F(f.into_arg(ex)),
-            FOP2(f2) => F2(f2.into_arg(ex)),
-            FOP3(f3) => F3(f3.into_arg(ex)),
-            BOP(b) => B(b.into_arg(ex)),
+            Fop(f) => F(f.into_icv(ex)),
+            F2op(f2) => F2(f2.into_icv(ex)),
+            F3op(f3) => F3(f3.into_icv(ex)),
+            Bop(b) => B(b.into_icv(ex)),
         }
     }
 }
 
-impl<M: Module> IntoArg<M, B> for BOP {
+impl<M: Module> IntoICV<M, B> for Bop {
     #[inline]
-    fn into_arg(self, ex: &mut Expression<M>) -> B {
+    fn into_icv(self, ex: &mut Expression<M>) -> B {
         match self {
-            BOP::CONST(c) => B::CONST(c),
-            BOP::I(i) => B::I(i),
-            _ => B::I(ex.push(BOP(self))),
+            Bop::CONST(c) => B::CONST(c),
+            Bop::I(i) => B::I(i),
+            _ => B::I(ex.push(Bop(self))),
         }
     }
 }
 
-impl<M: Module> IntoArg<M, F> for BOP {
+impl<M: Module> IntoICV<M, F> for Bop {
     #[inline]
-    fn into_arg(self, ex: &mut Expression<M>) -> F {
+    fn into_icv(self, ex: &mut Expression<M>) -> F {
         match self {
-            BOP::CONST(c) => F::CONST(c.into()),
-            BOP::I(i) => F::I(i),
-            _ => F::I(ex.push(BOP(self))),
+            Bop::CONST(c) => F::CONST(c.into()),
+            Bop::I(i) => F::I(i),
+            _ => F::I(ex.push(Bop(self))),
         }
     }
 }
 
-impl<M: Module> IntoArg<M, F2> for BOP {
+impl<M: Module> IntoICV<M, F2> for Bop {
     #[inline]
-    fn into_arg(self, ex: &mut Expression<M>) -> F2 {
+    fn into_icv(self, ex: &mut Expression<M>) -> F2 {
         match self {
-            BOP::CONST(c) => F2::CONST([c.into(); 2]),
-            BOP::I(i) => F2::F(F::I(i)),
-            _ => F2::F(F::I(ex.push(BOP(self)))),
+            Bop::CONST(c) => F2::CONST([c.into(); 2]),
+            Bop::I(i) => F2::F(F::I(i)),
+            _ => F2::F(F::I(ex.push(Bop(self)))),
         }
     }
 }
 
-impl<M: Module> IntoArg<M, F3> for BOP {
+impl<M: Module> IntoICV<M, F3> for Bop {
     #[inline]
-    fn into_arg(self, ex: &mut Expression<M>) -> F3 {
+    fn into_icv(self, ex: &mut Expression<M>) -> F3 {
         match self {
-            BOP::CONST(c) => F3::CONST([c.into(); 3]),
-            BOP::I(i) => F3::F(F::I(i)),
-            _ => F3::F(F::I(ex.push(BOP(self)))),
+            Bop::CONST(c) => F3::CONST([c.into(); 3]),
+            Bop::I(i) => F3::F(F::I(i)),
+            _ => F3::F(F::I(ex.push(Bop(self)))),
         }
     }
 }
 
-impl<M: Module> IntoArg<M, F> for FOP {
+impl<M: Module> IntoICV<M, F> for Fop {
     #[inline]
-    fn into_arg(self, ex: &mut Expression<M>) -> F {
+    fn into_icv(self, ex: &mut Expression<M>) -> F {
         match self {
-            FOP::CONST(c) => F::CONST(c),
-            FOP::VAR(v) => F::VAR(v),
-            FOP::I(i) => F::I(i),
-            _ => F::I(ex.push(FOP(self))),
+            Fop::CONST(c) => F::CONST(c),
+            Fop::VAR(v) => F::VAR(v),
+            Fop::I(i) => F::I(i),
+            _ => F::I(ex.push(Fop(self))),
         }
     }
 }
 
-impl<M: Module> IntoArg<M, B> for FOP {
+impl<M: Module> IntoICV<M, B> for Fop {
     #[inline]
-    fn into_arg(self, ex: &mut Expression<M>) -> B {
+    fn into_icv(self, ex: &mut Expression<M>) -> B {
         match self {
-            FOP::CONST(c) => B::CONST((c != 0.0).into()),
-            FOP::VAR(v) => B::VAR(v),
-            FOP::I(i) => B::I(i),
-            _ => B::I(ex.push(FOP(self))),
+            Fop::CONST(c) => B::CONST((c != 0.0).into()),
+            Fop::VAR(v) => B::VAR(v),
+            Fop::I(i) => B::I(i),
+            _ => B::I(ex.push(Fop(self))),
         }
     }
 }
 
-impl<M: Module> IntoArg<M, F2> for FOP {
+impl<M: Module> IntoICV<M, F2> for Fop {
     #[inline]
-    fn into_arg(self, ex: &mut Expression<M>) -> F2 {
+    fn into_icv(self, ex: &mut Expression<M>) -> F2 {
         match self {
-            FOP::CONST(c) => F2::CONST([c; 2]),
-            FOP::I(i) => F2::F(F::I(i)),
-            _ => F2::F(F::I(ex.push(FOP(self)))),
+            Fop::CONST(c) => F2::CONST([c; 2]),
+            Fop::I(i) => F2::F(F::I(i)),
+            _ => F2::F(F::I(ex.push(Fop(self)))),
         }
     }
 }
 
-impl<M: Module> IntoArg<M, F3> for FOP {
+impl<M: Module> IntoICV<M, F3> for Fop {
     #[inline]
-    fn into_arg(self, ex: &mut Expression<M>) -> F3 {
+    fn into_icv(self, ex: &mut Expression<M>) -> F3 {
         match self {
-            FOP::CONST(c) => F3::CONST([c; 3]),
-            FOP::I(i) => F3::F(F::I(i)),
-            _ => F3::F(F::I(ex.push(FOP(self)))),
+            Fop::CONST(c) => F3::CONST([c; 3]),
+            Fop::I(i) => F3::F(F::I(i)),
+            _ => F3::F(F::I(ex.push(Fop(self)))),
         }
     }
 }
 
-impl<M: Module> IntoArg<M, F2> for FOP2 {
+impl<M: Module> IntoICV<M, F2> for F2op {
     #[inline]
-    fn into_arg(self, ex: &mut Expression<M>) -> F2 {
+    fn into_icv(self, ex: &mut Expression<M>) -> F2 {
         match self {
-            FOP2::CONST(c) => F2::CONST(c),
-            FOP2::VAR(v) => F2::VAR(v),
-            FOP2::I(i) => F2::I(i),
-            _ => F2::I(ex.push(FOP2(self))),
+            F2op::CONST(c) => F2::CONST(c),
+            F2op::VAR(v) => F2::VAR(v),
+            F2op::I(i) => F2::I(i),
+            _ => F2::I(ex.push(F2op(self))),
         }
     }
 }
 
-impl<M: Module> IntoArg<M, F3> for FOP3 {
+impl<M: Module> IntoICV<M, F3> for F3op {
     #[inline]
-    fn into_arg(self, ex: &mut Expression<M>) -> F3 {
+    fn into_icv(self, ex: &mut Expression<M>) -> F3 {
         match self {
-            FOP3::CONST(c) => F3::CONST(c),
-            FOP3::VAR(v) => F3::VAR(v),
-            FOP3::I(i) => F3::I(i),
-            _ => F3::I(ex.push(FOP3(self))),
+            F3op::CONST(c) => F3::CONST(c),
+            F3op::VAR(v) => F3::VAR(v),
+            F3op::I(i) => F3::I(i),
+            _ => F3::I(ex.push(F3op(self))),
         }
     }
 }
@@ -285,30 +287,30 @@ impl<M: Module> Expression<'_, M> {
     #[inline]
     fn neg_wrap(&mut self, op: OP) -> OP {
         match op {
-            FOP(FOP::NEG(_)) | FOP2(FOP2::NEG(_)) | FOP3(FOP3::NEG(_)) => self.pop(),
-            FOP(FOP::CONST(c)) => FOP(FOP::CONST(-c)),
-            FOP(op) => FOP(FOP::NEG(op.into_arg(self))),
+            Fop(Fop::NEG(_)) | F2op(F2op::NEG(_)) | F3op(F3op::NEG(_)) => self.pop(),
+            Fop(Fop::CONST(c)) => Fop(Fop::CONST(-c)),
+            Fop(op) => Fop(Fop::NEG(op.into_icv(self))),
 
-            FOP2(FOP2::CONST([x, y])) => FOP2(FOP2::CONST([-x, -y])),
-            FOP2(op) => FOP2(FOP2::NEG(op.into_arg(self))),
+            F2op(F2op::CONST([x, y])) => F2op(F2op::CONST([-x, -y])),
+            F2op(op) => F2op(F2op::NEG(op.into_icv(self))),
 
-            FOP3(FOP3::CONST([x, y, z])) => FOP3(FOP3::CONST([-x, -y, -z])),
-            FOP3(op) => FOP3(FOP3::NEG(op.into_arg(self))),
+            F3op(F3op::CONST([x, y, z])) => F3op(F3op::CONST([-x, -y, -z])),
+            F3op(op) => F3op(F3op::NEG(op.into_icv(self))),
 
-            BOP(BOP::CONST(c)) => FOP(FOP::CONST(-f64::from(c))),
-            BOP(op) => FOP(FOP::NEG(op.into_arg(self))),
+            Bop(Bop::CONST(c)) => Fop(Fop::CONST(-f64::from(c))),
+            Bop(op) => Fop(Fop::NEG(op.into_icv(self))),
         }
     }
 
     #[inline]
     fn not_wrap(&mut self, op: OP) -> Result<OP, Error> {
         match op {
-            BOP(BOP::NOT(_)) => Ok(self.pop()),
-            BOP(BOP::CONST(c)) => Ok(BOP(BOP::CONST(!c))),
-            BOP(op) => Ok(BOP(BOP::NOT(op.into_arg(self)))),
+            Bop(Bop::NOT(_)) => Ok(self.pop()),
+            Bop(Bop::CONST(c)) => Ok(Bop(Bop::CONST(!c))),
+            Bop(op) => Ok(Bop(Bop::NOT(op.into_icv(self)))),
 
-            FOP(FOP::CONST(c)) => Ok(BOP(BOP::CONST((c == 0.0).into()))),
-            FOP(op) => Ok(BOP(BOP::NOT(op.into_arg(self)))),
+            Fop(Fop::CONST(c)) => Ok(Bop(Bop::CONST((c == 0.0).into()))),
+            Fop(op) => Ok(Bop(Bop::NOT(op.into_icv(self)))),
             _ => Err(Error::InvalidType(
                 "invalid operand type for ! operator".into(),
             )),
@@ -318,62 +320,62 @@ impl<M: Module> Expression<'_, M> {
     #[inline]
     fn inv_wrap(&mut self, op: OP) -> OP {
         match op {
-            FOP(FOP::INV(_)) | FOP2(FOP2::INV(_)) => self.pop(),
-            FOP(FOP::CONST(c)) => FOP(FOP::CONST(c.recip())),
-            FOP(op) => FOP(FOP::INV(op.into_arg(self))),
+            Fop(Fop::INV(_)) | F2op(F2op::INV(_)) => self.pop(),
+            Fop(Fop::CONST(c)) => Fop(Fop::CONST(c.recip())),
+            Fop(op) => Fop(Fop::INV(op.into_icv(self))),
 
-            FOP2(FOP2::CONST([x, y])) => FOP2(FOP2::CONST([x.recip(), y.recip()])),
-            FOP2(op) => FOP2(FOP2::INV(op.into_arg(self))),
+            F2op(F2op::CONST([x, y])) => F2op(F2op::CONST([x.recip(), y.recip()])),
+            F2op(op) => F2op(F2op::INV(op.into_icv(self))),
 
-            FOP3(FOP3::CONST([x, y, z])) => FOP3(FOP3::CONST([x.recip(), y.recip(), z.recip()])),
-            FOP3(op) => FOP3(FOP3::INV(op.into_arg(self))),
+            F3op(F3op::CONST([x, y, z])) => F3op(F3op::CONST([x.recip(), y.recip(), z.recip()])),
+            F3op(op) => F3op(F3op::INV(op.into_icv(self))),
 
-            BOP(BOP::CONST(c)) => FOP(FOP::CONST(f64::from(c).recip())),
-            BOP(op) => FOP(FOP::INV(op.into_arg(self))),
+            Bop(Bop::CONST(c)) => Fop(Fop::CONST(f64::from(c).recip())),
+            Bop(op) => Fop(Fop::INV(op.into_icv(self))),
         }
     }
 
     #[inline]
     fn compile_mul(&mut self, sorted_ops: Vec<OP>) -> Result<OP, Error> {
-        let mut const_out = FOP(FOP::CONST(1.0));
-        let mut out = FOP(FOP::CONST(1.0));
+        let mut const_out = Fop(Fop::CONST(1.0));
+        let mut out = Fop(Fop::CONST(1.0));
 
         for op in sorted_ops {
             match (out, op) {
-                (FOP(FOP::CONST(c0)), FOP(FOP::CONST(c1))) => {
-                    out = FOP(FOP::CONST(c0 * c1));
+                (Fop(Fop::CONST(c0)), Fop(Fop::CONST(c1))) => {
+                    out = Fop(Fop::CONST(c0 * c1));
                 }
-                (FOP(FOP::CONST(c0)), FOP2(FOP2::CONST([cx1, cy1]))) => {
-                    out = FOP2(FOP2::CONST([c0 * cx1, c0 * cy1]));
+                (Fop(Fop::CONST(c0)), F2op(F2op::CONST([cx1, cy1]))) => {
+                    out = F2op(F2op::CONST([c0 * cx1, c0 * cy1]));
                 }
-                (FOP2(FOP2::CONST([cx0, cy0])), FOP2(FOP2::CONST([cx1, cy1]))) => {
-                    out = FOP2(FOP2::CONST([cx0 * cx1, cy0 * cy1]));
+                (F2op(F2op::CONST([cx0, cy0])), F2op(F2op::CONST([cx1, cy1]))) => {
+                    out = F2op(F2op::CONST([cx0 * cx1, cy0 * cy1]));
                 }
-                (FOP(FOP::CONST(c0)), FOP3(FOP3::CONST([cx1, cy1, cz1]))) => {
-                    out = FOP3(FOP3::CONST([c0 * cx1, c0 * cy1, c0 * cz1]));
+                (Fop(Fop::CONST(c0)), F3op(F3op::CONST([cx1, cy1, cz1]))) => {
+                    out = F3op(F3op::CONST([c0 * cx1, c0 * cy1, c0 * cz1]));
                 }
-                (FOP3(FOP3::CONST([cx0, cy0, cz0])), FOP3(FOP3::CONST([cx1, cy1, cz1]))) => {
-                    out = FOP3(FOP3::CONST([cx0 * cx1, cy0 * cy1, cz0 * cz1]));
+                (F3op(F3op::CONST([cx0, cy0, cz0])), F3op(F3op::CONST([cx1, cy1, cz1]))) => {
+                    out = F3op(F3op::CONST([cx0 * cx1, cy0 * cy1, cz0 * cz1]));
                 }
-                (op1 @ (FOP(FOP::CONST(_)) | FOP2(FOP2::CONST(_)) | FOP3(FOP3::CONST(_))), op2) => {
+                (op1 @ (Fop(Fop::CONST(_)) | F2op(F2op::CONST(_)) | F3op(F3op::CONST(_))), op2) => {
                     const_out = op1;
                     out = op2;
                 }
 
-                (FOP(fop0), FOP(fop1)) => {
-                    out = FOP(FOP::MUL(fop0.into_arg(self), fop1.into_arg(self)));
+                (Fop(fop0), Fop(fop1)) => {
+                    out = Fop(Fop::MUL(fop0.into_icv(self), fop1.into_icv(self)));
                 }
-                (FOP(fop0), FOP2(uop1)) => {
-                    out = FOP2(FOP2::MUL(fop0.into_arg(self), uop1.into_arg(self)));
+                (Fop(fop0), F2op(uop1)) => {
+                    out = F2op(F2op::MUL(fop0.into_icv(self), uop1.into_icv(self)));
                 }
-                (FOP2(uop0), FOP2(uop1)) => {
-                    out = FOP2(FOP2::MUL(uop0.into_arg(self), uop1.into_arg(self)));
+                (F2op(uop0), F2op(uop1)) => {
+                    out = F2op(F2op::MUL(uop0.into_icv(self), uop1.into_icv(self)));
                 }
-                (FOP(fop0), FOP3(uop1)) => {
-                    out = FOP3(FOP3::MUL(fop0.into_arg(self), uop1.into_arg(self)));
+                (Fop(fop0), F3op(uop1)) => {
+                    out = F3op(F3op::MUL(fop0.into_icv(self), uop1.into_icv(self)));
                 }
-                (FOP3(uop0), FOP3(uop1)) => {
-                    out = FOP3(FOP3::MUL(uop0.into_arg(self), uop1.into_arg(self)));
+                (F3op(uop0), F3op(uop1)) => {
+                    out = F3op(F3op::MUL(uop0.into_icv(self), uop1.into_icv(self)));
                 }
                 (l, r) => {
                     return Err(Error::InvalidType(
@@ -384,19 +386,19 @@ impl<M: Module> Expression<'_, M> {
         }
 
         match (const_out, out) {
-            (FOP(FOP::CONST(1.0)), op1 @ FOP(_)) => Ok(op1),
-            (FOP(fop0), FOP(fop1)) => Ok(FOP(FOP::MUL(fop0.into_arg(self), fop1.into_arg(self)))),
-            (FOP2(FOP2::CONST([1.0, 1.0])), op1 @ FOP2(_)) => Ok(op1),
-            (op0 @ (FOP(_) | FOP2(_)), op1 @ (FOP(_) | FOP2(_))) => {
-                let l = op0.into_arg(self).try_into().unwrap();
-                let r = op1.into_arg(self).try_into().unwrap();
-                Ok(FOP2(FOP2::MUL(l, r)))
+            (Fop(Fop::CONST(1.0)), op1 @ Fop(_)) => Ok(op1),
+            (Fop(fop0), Fop(fop1)) => Ok(Fop(Fop::MUL(fop0.into_icv(self), fop1.into_icv(self)))),
+            (F2op(F2op::CONST([1.0, 1.0])), op1 @ F2op(_)) => Ok(op1),
+            (op0 @ (Fop(_) | F2op(_)), op1 @ (Fop(_) | F2op(_))) => {
+                let l = op0.into_icv(self).try_into().unwrap();
+                let r = op1.into_icv(self).try_into().unwrap();
+                Ok(F2op(F2op::MUL(l, r)))
             }
-            (FOP3(FOP3::CONST([1.0, 1.0, 1.0])), op1 @ FOP3(_)) => Ok(op1),
-            (op0 @ (FOP(_) | FOP3(_)), op1 @ (FOP(_) | FOP3(_))) => {
-                let l = op0.into_arg(self).try_into().unwrap();
-                let r = op1.into_arg(self).try_into().unwrap();
-                Ok(FOP3(FOP3::MUL(l, r)))
+            (F3op(F3op::CONST([1.0, 1.0, 1.0])), op1 @ F3op(_)) => Ok(op1),
+            (op0 @ (Fop(_) | F3op(_)), op1 @ (Fop(_) | F3op(_))) => {
+                let l = op0.into_icv(self).try_into().unwrap();
+                let r = op1.into_icv(self).try_into().unwrap();
+                Ok(F3op(F3op::MUL(l, r)))
             }
             _ => Err(Error::Unreachable),
         }
@@ -404,45 +406,45 @@ impl<M: Module> Expression<'_, M> {
 
     #[inline]
     fn compile_add(&mut self, sorted_ops: Vec<OP>) -> Result<OP, Error> {
-        let mut const_out = FOP(FOP::CONST(0.0));
-        let mut out = FOP(FOP::CONST(0.0));
+        let mut const_out = Fop(Fop::CONST(0.0));
+        let mut out = Fop(Fop::CONST(0.0));
 
         for op in sorted_ops {
             match (out, op) {
-                (FOP(FOP::CONST(c0)), FOP(FOP::CONST(c1))) => {
-                    out = FOP(FOP::CONST(c0 + c1));
+                (Fop(Fop::CONST(c0)), Fop(Fop::CONST(c1))) => {
+                    out = Fop(Fop::CONST(c0 + c1));
                 }
-                (FOP(FOP::CONST(c0)), FOP2(FOP2::CONST([cx1, cy1]))) => {
-                    out = FOP2(FOP2::CONST([c0 + cx1, c0 + cy1]));
+                (Fop(Fop::CONST(c0)), F2op(F2op::CONST([cx1, cy1]))) => {
+                    out = F2op(F2op::CONST([c0 + cx1, c0 + cy1]));
                 }
-                (FOP2(FOP2::CONST([cx0, cy0])), FOP2(FOP2::CONST([cx1, cy1]))) => {
-                    out = FOP2(FOP2::CONST([cx0 + cx1, cy0 + cy1]));
+                (F2op(F2op::CONST([cx0, cy0])), F2op(F2op::CONST([cx1, cy1]))) => {
+                    out = F2op(F2op::CONST([cx0 + cx1, cy0 + cy1]));
                 }
-                (FOP(FOP::CONST(c0)), FOP3(FOP3::CONST([cx1, cy1, cz1]))) => {
-                    out = FOP3(FOP3::CONST([c0 + cx1, c0 + cy1, c0 + cz1]));
+                (Fop(Fop::CONST(c0)), F3op(F3op::CONST([cx1, cy1, cz1]))) => {
+                    out = F3op(F3op::CONST([c0 + cx1, c0 + cy1, c0 + cz1]));
                 }
-                (FOP3(FOP3::CONST([cx0, cy0, cz0])), FOP3(FOP3::CONST([cx1, cy1, cz1]))) => {
-                    out = FOP3(FOP3::CONST([cx0 + cx1, cy0 + cy1, cz0 + cz1]));
+                (F3op(F3op::CONST([cx0, cy0, cz0])), F3op(F3op::CONST([cx1, cy1, cz1]))) => {
+                    out = F3op(F3op::CONST([cx0 + cx1, cy0 + cy1, cz0 + cz1]));
                 }
-                (op1 @ (FOP(FOP::CONST(_)) | FOP2(FOP2::CONST(_)) | FOP3(FOP3::CONST(_))), op2) => {
+                (op1 @ (Fop(Fop::CONST(_)) | F2op(F2op::CONST(_)) | F3op(F3op::CONST(_))), op2) => {
                     const_out = op1;
                     out = op2;
                 }
 
-                (FOP(fop0), FOP(fop1)) => {
-                    out = FOP(FOP::ADD(fop0.into_arg(self), fop1.into_arg(self)));
+                (Fop(fop0), Fop(fop1)) => {
+                    out = Fop(Fop::ADD(fop0.into_icv(self), fop1.into_icv(self)));
                 }
-                (FOP(fop0), FOP2(uop1)) => {
-                    out = FOP2(FOP2::ADD(fop0.into_arg(self), uop1.into_arg(self)));
+                (Fop(fop0), F2op(uop1)) => {
+                    out = F2op(F2op::ADD(fop0.into_icv(self), uop1.into_icv(self)));
                 }
-                (FOP2(uop0), FOP2(uop1)) => {
-                    out = FOP2(FOP2::ADD(uop0.into_arg(self), uop1.into_arg(self)));
+                (F2op(uop0), F2op(uop1)) => {
+                    out = F2op(F2op::ADD(uop0.into_icv(self), uop1.into_icv(self)));
                 }
-                (FOP(fop0), FOP3(uop1)) => {
-                    out = FOP3(FOP3::ADD(fop0.into_arg(self), uop1.into_arg(self)));
+                (Fop(fop0), F3op(uop1)) => {
+                    out = F3op(F3op::ADD(fop0.into_icv(self), uop1.into_icv(self)));
                 }
-                (FOP3(uop0), FOP3(uop1)) => {
-                    out = FOP3(FOP3::ADD(uop0.into_arg(self), uop1.into_arg(self)));
+                (F3op(uop0), F3op(uop1)) => {
+                    out = F3op(F3op::ADD(uop0.into_icv(self), uop1.into_icv(self)));
                 }
                 (l, r) => {
                     return Err(Error::InvalidType(
@@ -453,19 +455,19 @@ impl<M: Module> Expression<'_, M> {
         }
 
         match (const_out, out) {
-            (FOP(FOP::CONST(0.0)), op1 @ FOP(_)) => Ok(op1),
-            (FOP(fop0), FOP(fop1)) => Ok(FOP(FOP::ADD(fop0.into_arg(self), fop1.into_arg(self)))),
-            (FOP2(FOP2::CONST([0.0, 0.0])), op1 @ FOP2(_)) => Ok(op1),
-            (op0 @ (FOP(_) | FOP2(_)), op1 @ (FOP(_) | FOP2(_))) => {
-                let l = op0.into_arg(self).try_into().unwrap();
-                let r = op1.into_arg(self).try_into().unwrap();
-                Ok(FOP2(FOP2::ADD(l, r)))
+            (Fop(Fop::CONST(0.0)), op1 @ Fop(_)) => Ok(op1),
+            (Fop(fop0), Fop(fop1)) => Ok(Fop(Fop::ADD(fop0.into_icv(self), fop1.into_icv(self)))),
+            (F2op(F2op::CONST([0.0, 0.0])), op1 @ F2op(_)) => Ok(op1),
+            (op0 @ (Fop(_) | F2op(_)), op1 @ (Fop(_) | F2op(_))) => {
+                let l = op0.into_icv(self).try_into().unwrap();
+                let r = op1.into_icv(self).try_into().unwrap();
+                Ok(F2op(F2op::ADD(l, r)))
             }
-            (FOP3(FOP3::CONST([0.0, 0.0, 0.0])), op1 @ FOP3(_)) => Ok(op1),
-            (op0 @ (FOP(_) | FOP3(_)), op1 @ (FOP(_) | FOP3(_))) => {
-                let l = op0.into_arg(self).try_into().unwrap();
-                let r = op1.into_arg(self).try_into().unwrap();
-                Ok(FOP3(FOP3::ADD(l, r)))
+            (F3op(F3op::CONST([0.0, 0.0, 0.0])), op1 @ F3op(_)) => Ok(op1),
+            (op0 @ (Fop(_) | F3op(_)), op1 @ (Fop(_) | F3op(_))) => {
+                let l = op0.into_icv(self).try_into().unwrap();
+                let r = op1.into_icv(self).try_into().unwrap();
+                Ok(F3op(F3op::ADD(l, r)))
             }
             _ => Err(Error::Unreachable),
         }
@@ -474,15 +476,15 @@ impl<M: Module> Expression<'_, M> {
     #[inline]
     fn push_add_leafs(&mut self, ops: &mut Vec<OP>, op: OP) {
         match op {
-            FOP(FOP::ADD(l, r)) => {
+            Fop(Fop::ADD(l, r)) => {
                 self.push_f_add_leaf(ops, r);
                 self.push_f_add_leaf(ops, l);
             }
-            FOP2(FOP2::ADD(l, r)) => {
+            F2op(F2op::ADD(l, r)) => {
                 self.push_f2_add_leaf(ops, r);
                 self.push_f2_add_leaf(ops, l);
             }
-            FOP3(FOP3::ADD(l, r)) => {
+            F3op(F3op::ADD(l, r)) => {
                 self.push_f3_add_leaf(ops, r);
                 self.push_f3_add_leaf(ops, l);
             }
@@ -498,8 +500,8 @@ impl<M: Module> Expression<'_, M> {
                 let op = self.pop();
                 self.push_add_leafs(ops, op);
             }
-            F::CONST(c) => ops.push(FOP(FOP::CONST(c))),
-            F::VAR(i) => ops.push(FOP(FOP::VAR(i))),
+            F::CONST(c) => ops.push(Fop(Fop::CONST(c))),
+            F::VAR(i) => ops.push(Fop(Fop::VAR(i))),
         };
     }
     fn push_f2_add_leaf(&mut self, ops: &mut Vec<OP>, f2: F2) {
@@ -510,15 +512,15 @@ impl<M: Module> Expression<'_, M> {
                 self.push_add_leafs(ops, op);
             }
 
-            F2::CONST(c) => ops.push(FOP2(FOP2::CONST(c))),
-            F2::VAR(i) => ops.push(FOP2(FOP2::VAR(i))),
+            F2::CONST(c) => ops.push(F2op(F2op::CONST(c))),
+            F2::VAR(i) => ops.push(F2op(F2op::VAR(i))),
             F2::F(f) => match f {
                 F::I(_) => {
                     let op = self.pop();
                     self.push_add_leafs(ops, op);
                 }
-                F::CONST(c) => ops.push(FOP(FOP::CONST(c))),
-                F::VAR(i) => ops.push(FOP(FOP::VAR(i))),
+                F::CONST(c) => ops.push(Fop(Fop::CONST(c))),
+                F::VAR(i) => ops.push(Fop(Fop::VAR(i))),
             },
         };
     }
@@ -531,15 +533,15 @@ impl<M: Module> Expression<'_, M> {
                 self.push_add_leafs(ops, op);
             }
 
-            F3::CONST(c) => ops.push(FOP3(FOP3::CONST(c))),
-            F3::VAR(i) => ops.push(FOP3(FOP3::VAR(i))),
+            F3::CONST(c) => ops.push(F3op(F3op::CONST(c))),
+            F3::VAR(i) => ops.push(F3op(F3op::VAR(i))),
             F3::F(f) => match f {
                 F::I(_) => {
                     let op = self.pop();
                     self.push_add_leafs(ops, op);
                 }
-                F::CONST(c) => ops.push(FOP(FOP::CONST(c))),
-                F::VAR(i) => ops.push(FOP(FOP::VAR(i))),
+                F::CONST(c) => ops.push(Fop(Fop::CONST(c))),
+                F::VAR(i) => ops.push(Fop(Fop::VAR(i))),
             },
         };
     }
@@ -547,15 +549,15 @@ impl<M: Module> Expression<'_, M> {
     #[inline]
     fn push_mul_leafs(&mut self, ops: &mut Vec<OP>, op: OP) {
         match op {
-            FOP(FOP::MUL(l, r)) => {
+            Fop(Fop::MUL(l, r)) => {
                 self.push_f_mul_leaf(ops, r);
                 self.push_f_mul_leaf(ops, l);
             }
-            FOP2(FOP2::MUL(l, r)) => {
+            F2op(F2op::MUL(l, r)) => {
                 self.push_f2_mul_leaf(ops, r);
                 self.push_f2_mul_leaf(ops, l);
             }
-            FOP3(FOP3::MUL(l, r)) => {
+            F3op(F3op::MUL(l, r)) => {
                 self.push_f3_mul_leaf(ops, r);
                 self.push_f3_mul_leaf(ops, l);
             }
@@ -571,8 +573,8 @@ impl<M: Module> Expression<'_, M> {
                 let op = self.pop();
                 self.push_mul_leafs(ops, op);
             }
-            F::CONST(c) => ops.push(FOP(FOP::CONST(c))),
-            F::VAR(i) => ops.push(FOP(FOP::VAR(i))),
+            F::CONST(c) => ops.push(Fop(Fop::CONST(c))),
+            F::VAR(i) => ops.push(Fop(Fop::VAR(i))),
         };
     }
 
@@ -584,15 +586,15 @@ impl<M: Module> Expression<'_, M> {
                 self.push_mul_leafs(ops, op);
             }
 
-            F2::CONST(c) => ops.push(FOP2(FOP2::CONST(c))),
-            F2::VAR(i) => ops.push(FOP2(FOP2::VAR(i))),
+            F2::CONST(c) => ops.push(F2op(F2op::CONST(c))),
+            F2::VAR(i) => ops.push(F2op(F2op::VAR(i))),
             F2::F(f) => match f {
                 F::I(_) => {
                     let op = self.pop();
                     self.push_mul_leafs(ops, op);
                 }
-                F::CONST(c) => ops.push(FOP(FOP::CONST(c))),
-                F::VAR(i) => ops.push(FOP(FOP::VAR(i))),
+                F::CONST(c) => ops.push(Fop(Fop::CONST(c))),
+                F::VAR(i) => ops.push(Fop(Fop::VAR(i))),
             },
         };
     }
@@ -605,15 +607,15 @@ impl<M: Module> Expression<'_, M> {
                 self.push_mul_leafs(ops, op);
             }
 
-            F3::CONST(c) => ops.push(FOP3(FOP3::CONST(c))),
-            F3::VAR(i) => ops.push(FOP3(FOP3::VAR(i))),
+            F3::CONST(c) => ops.push(F3op(F3op::CONST(c))),
+            F3::VAR(i) => ops.push(F3op(F3op::VAR(i))),
             F3::F(f) => match f {
                 F::I(_) => {
                     let op = self.pop();
                     self.push_mul_leafs(ops, op);
                 }
-                F::CONST(c) => ops.push(FOP(FOP::CONST(c))),
-                F::VAR(i) => ops.push(FOP(FOP::VAR(i))),
+                F::CONST(c) => ops.push(Fop(Fop::CONST(c))),
+                F::VAR(i) => ops.push(Fop(Fop::VAR(i))),
             },
         }
     }
@@ -710,59 +712,59 @@ impl<M: Module> Compiler<M> for ExprSlice<'_> {
 
             for (i, _op) in ops.into_iter().enumerate() {
                 let op = xss.get(i + 1).unwrap().compile(ast, ex)?;
-                let l = out.into_arg(ex).convert_bool();
-                let r = op.into_arg(ex).convert_bool();
+                let l = out.into_icv(ex).convert_bool();
+                let r = op.into_icv(ex).convert_bool();
 
                 out = match (_op, l, r) {
-                    (EQ, F(F::CONST(l)), F(F::CONST(r))) => BOP(BOP::CONST(l == r)),
-                    (EQ, F(l), F(r)) => BOP(BOP::EQ(l, r)),
+                    (EQ, F(F::CONST(l)), F(F::CONST(r))) => Bop(Bop::CONST(l == r)),
+                    (EQ, F(l), F(r)) => Bop(Bop::EQ(l, r)),
                     (EQ, l @ (F(_) | F2(_)), r @ (F(_) | F2(_))) => {
                         let l = l.try_into().unwrap();
                         let r = r.try_into().unwrap();
                         match (l, r) {
-                            (F2::CONST(l), F2::CONST(r)) => BOP(BOP::CONST(l == r)),
-                            _ => BOP(BOP::EQ2(l, r)),
+                            (F2::CONST(l), F2::CONST(r)) => Bop(Bop::CONST(l == r)),
+                            _ => Bop(Bop::EQ2(l, r)),
                         }
                     }
                     (EQ, l @ (F(_) | F3(_)), r @ (F(_) | F3(_))) => {
                         let l = l.try_into().unwrap();
                         let r = r.try_into().unwrap();
                         match (l, r) {
-                            (F3::CONST(l), F3::CONST(r)) => BOP(BOP::CONST(l == r)),
-                            _ => BOP(BOP::EQ3(l, r)),
+                            (F3::CONST(l), F3::CONST(r)) => Bop(Bop::CONST(l == r)),
+                            _ => Bop(Bop::EQ3(l, r)),
                         }
                     }
 
-                    (NE, F(F::CONST(l)), F(F::CONST(r))) => BOP(BOP::CONST(l != r)),
-                    (NE, F(l), F(r)) => BOP(BOP::NE(l, r)),
+                    (NE, F(F::CONST(l)), F(F::CONST(r))) => Bop(Bop::CONST(l != r)),
+                    (NE, F(l), F(r)) => Bop(Bop::NE(l, r)),
                     (NE, l @ (F(_) | F2(_)), r @ (F(_) | F2(_))) => {
                         let l = l.try_into().unwrap();
                         let r = r.try_into().unwrap();
                         match (l, r) {
-                            (F2::CONST(l), F2::CONST(r)) => BOP(BOP::CONST(l != r)),
-                            _ => BOP(BOP::NE2(l, r)),
+                            (F2::CONST(l), F2::CONST(r)) => Bop(Bop::CONST(l != r)),
+                            _ => Bop(Bop::NE2(l, r)),
                         }
                     }
                     (NE, l @ (F(_) | F3(_)), r @ (F(_) | F3(_))) => {
                         let l = l.try_into().unwrap();
                         let r = r.try_into().unwrap();
                         match (l, r) {
-                            (F3::CONST(l), F3::CONST(r)) => BOP(BOP::CONST(l != r)),
-                            _ => BOP(BOP::NE3(l, r)),
+                            (F3::CONST(l), F3::CONST(r)) => Bop(Bop::CONST(l != r)),
+                            _ => Bop(Bop::NE3(l, r)),
                         }
                     }
 
-                    (LT, F(F::CONST(l)), F(F::CONST(r))) => BOP(BOP::CONST(l < r)),
-                    (LT, F(l), F(r)) => BOP(BOP::LT(l, r)),
+                    (LT, F(F::CONST(l)), F(F::CONST(r))) => Bop(Bop::CONST(l < r)),
+                    (LT, F(l), F(r)) => Bop(Bop::LT(l, r)),
 
-                    (GT, F(F::CONST(l)), F(F::CONST(r))) => BOP(BOP::CONST(l > r)),
-                    (GT, F(l), F(r)) => BOP(BOP::GT(l, r)),
+                    (GT, F(F::CONST(l)), F(F::CONST(r))) => Bop(Bop::CONST(l > r)),
+                    (GT, F(l), F(r)) => Bop(Bop::GT(l, r)),
 
-                    (LE, F(F::CONST(l)), F(F::CONST(r))) => BOP(BOP::CONST(l <= r)),
-                    (LE, F(l), F(r)) => BOP(BOP::LE(l, r)),
+                    (LE, F(F::CONST(l)), F(F::CONST(r))) => Bop(Bop::CONST(l <= r)),
+                    (LE, F(l), F(r)) => Bop(Bop::LE(l, r)),
 
-                    (GE, F(F::CONST(l)), F(F::CONST(r))) => BOP(BOP::CONST(l >= r)),
-                    (GE, F(l), F(r)) => BOP(BOP::GE(l, r)),
+                    (GE, F(F::CONST(l)), F(F::CONST(r))) => Bop(Bop::CONST(l >= r)),
+                    (GE, F(l), F(r)) => Bop(Bop::GE(l, r)),
 
                     (_op, l, r) => {
                         return Err(Error::InvalidType(format!(
@@ -779,20 +781,20 @@ impl<M: Module> Compiler<M> for ExprSlice<'_> {
             Or => {
                 let mut xss = Vec::<ExprSlice>::with_capacity(4);
                 self.split(Or, &mut xss);
-                let mut out = BOP(BOP::CONST(false));
+                let mut out = Bop(Bop::CONST(false));
                 let mut out_set = false;
                 for xs in xss.iter() {
                     let op = xs.compile(ast, ex)?;
                     out = if out_set {
-                        let l = out.into_arg(ex).try_into().map_err(|_| {
+                        let l = out.into_icv(ex).try_into().map_err(|_| {
                             Error::InvalidType("Invalid operands type for '||' operator".into())
                         })?;
-                        let r = op.into_arg(ex).try_into().map_err(|_| {
+                        let r = op.into_icv(ex).try_into().map_err(|_| {
                             Error::InvalidType("Invalid operands type for '||' operator".into())
                         })?;
                         match (l, r) {
-                            (B::CONST(l), B::CONST(r)) => BOP(BOP::CONST(l || r)),
-                            _ => BOP(BOP::OR(l, r)),
+                            (B::CONST(l), B::CONST(r)) => Bop(Bop::CONST(l || r)),
+                            _ => Bop(Bop::OR(l, r)),
                         }
                     } else {
                         out_set = true;
@@ -804,20 +806,20 @@ impl<M: Module> Compiler<M> for ExprSlice<'_> {
             And => {
                 let mut xss = Vec::<ExprSlice>::with_capacity(4);
                 self.split(And, &mut xss);
-                let mut out = BOP(BOP::CONST(true));
+                let mut out = Bop(Bop::CONST(true));
                 let mut out_set = false;
                 for xs in xss.iter() {
                     let op = xs.compile(ast, ex)?;
                     out = if out_set {
-                        let l = out.into_arg(ex).try_into().map_err(|_| {
+                        let l = out.into_icv(ex).try_into().map_err(|_| {
                             Error::InvalidType("invalid operands type for '&&' operator".into())
                         })?;
-                        let r = op.into_arg(ex).try_into().map_err(|_| {
+                        let r = op.into_icv(ex).try_into().map_err(|_| {
                             Error::InvalidType("invalid operands type for '&&' operator".into())
                         })?;
                         match (l, r) {
-                            (B::CONST(l), B::CONST(r)) => BOP(BOP::CONST(l && r)),
-                            _ => BOP(BOP::AND(l, r)),
+                            (B::CONST(l), B::CONST(r)) => Bop(Bop::CONST(l && r)),
+                            _ => Bop(Bop::AND(l, r)),
                         }
                     } else {
                         out_set = true;
@@ -882,14 +884,14 @@ impl<M: Module> Compiler<M> for ExprSlice<'_> {
             Rem => {
                 let mut xss = Vec::<ExprSlice>::with_capacity(4);
                 self.split(Rem, &mut xss);
-                let mut out = FOP(FOP::CONST(0.0));
+                let mut out = Fop(Fop::CONST(0.0));
                 let mut out_set = false;
                 for xs in xss.iter() {
                     let op = xs.compile(ast, ex)?;
                     out = if out_set {
-                        let l = out.into_arg(ex);
-                        let r = op.into_arg(ex);
-                        compile_op!(REM, rem, (l, r))
+                        let l = out.into_icv(ex);
+                        let r = op.into_icv(ex);
+                        compile_op!(::REM(l, r), Float::rem)
                     } else {
                         out_set = true;
                         op
@@ -900,15 +902,15 @@ impl<M: Module> Compiler<M> for ExprSlice<'_> {
             Pow => {
                 let mut xss = Vec::<ExprSlice>::with_capacity(4);
                 self.split(Pow, &mut xss);
-                let mut out = FOP(FOP::CONST(0.0));
+                let mut out = Fop(Fop::CONST(0.0));
                 let mut out_set = false;
                 // Right-to-Left Associativity
                 for xs in xss.into_iter().rev() {
                     let op = xs.compile(ast, ex)?;
                     out = if out_set {
-                        let l = op.into_arg(ex);
-                        let r = out.into_arg(ex);
-                        compile_op!(POW, pow, (l, r))
+                        let l = op.into_icv(ex);
+                        let r = out.into_icv(ex);
+                        compile_op!(::POW(l, r), Float::pow)
                     } else {
                         out_set = true;
                         op
@@ -947,10 +949,10 @@ impl<M: Module> Compiler<M> for UnaryOp {
 impl<M: Module> Compiler<M> for ECV {
     fn compile(&self, ast: &Ast, ex: &mut Expression<M>) -> Result<OP, Error> {
         match self {
-            Const(c) => Ok(FOP(FOP::CONST(*c))),
+            Const(c) => Ok(Fop(Fop::CONST(*c))),
             Var(name) => {
-                if let Some(arg) = ex.locals.get(name) {
-                    Ok(arg.clone().into())
+                if let Some(icv) = ex.locals.get(name) {
+                    Ok(icv.clone().into())
                 } else if let Some(op) = ex.module.dispatch_ident(name) {
                     Ok(op)
                 } else {
@@ -970,7 +972,7 @@ impl<M: Module> Compiler<M> for Value {
             Func(name, string, eargs) => {
                 if let ("if", None, [cond, then, els]) = (name.as_str(), string, eargs.as_slice()) {
                     let cond = cond.compile(ast, ex)?;
-                    let cond: B = cond.into_arg(ex).try_into()?;
+                    let cond: B = cond.into_icv(ex).try_into()?;
                     let then = then.compile(ast, ex)?;
                     let els = els.compile(ast, ex)?;
 
@@ -978,25 +980,25 @@ impl<M: Module> Compiler<M> for Value {
                         (B::CONST(false), _, els) => Ok(els),
                         (B::CONST(_), then, _) => Ok(then),
                         (cond, then, els) => match then.optype().max(els.optype()) {
-                            Type::B => Ok(BOP(BOP::IF(
+                            Type::B => Ok(Bop(Bop::IF(
                                 cond,
-                                then.into_arg(ex).try_into().unwrap(),
-                                els.into_arg(ex).try_into().unwrap(),
+                                then.into_icv(ex).try_into().unwrap(),
+                                els.into_icv(ex).try_into().unwrap(),
                             ))),
-                            Type::F => Ok(FOP(FOP::IF(
+                            Type::F => Ok(Fop(Fop::IF(
                                 cond,
-                                then.into_arg(ex).try_into().unwrap(),
-                                els.into_arg(ex).try_into().unwrap(),
+                                then.into_icv(ex).try_into().unwrap(),
+                                els.into_icv(ex).try_into().unwrap(),
                             ))),
-                            Type::F2 => Ok(FOP2(FOP2::IF(
+                            Type::F2 => Ok(F2op(F2op::IF(
                                 cond,
-                                then.into_arg(ex).try_into().unwrap(),
-                                els.into_arg(ex).try_into().unwrap(),
+                                then.into_icv(ex).try_into().unwrap(),
+                                els.into_icv(ex).try_into().unwrap(),
                             ))),
-                            Type::F3 => Ok(FOP3(FOP3::IF(
+                            Type::F3 => Ok(F3op(F3op::IF(
                                 cond,
-                                then.into_arg(ex).try_into()?,
-                                els.into_arg(ex).try_into()?,
+                                then.into_icv(ex).try_into()?,
+                                els.into_icv(ex).try_into()?,
                             ))),
                         },
                     }
@@ -1004,34 +1006,32 @@ impl<M: Module> Compiler<M> for Value {
                     let mut args = Vec::with_capacity(eargs.len());
                     for earg in eargs {
                         let op = earg.compile(ast, ex)?;
-                        let arg = op.into_arg(ex);
-                        args.push(arg);
+                        let icv = op.into_icv(ex);
+                        args.push(icv);
                     }
                     let string = string.as_deref();
                     if let Some(op) = ex.module.dispatch_func(&name, string, &args) {
                         Ok(op)
                     } else {
-                        builtins::dispatch_func(&name, string, &args).ok_or(Error::Undefined(
-                            format!("cannot find function '{}'", signature(name, &args)),
-                        ))
+                        builtins::dispatch_func(&name, string, &args)
                     }
                 }
             }
             List(vals) => match &vals.as_slice() {
-                &[ECV::Const(cx), ECV::Const(cy)] => Ok(FOP2(FOP2::CONST([*cx, *cy]))),
+                &[ECV::Const(cx), ECV::Const(cy)] => Ok(F2op(F2op::CONST([*cx, *cy]))),
                 &[ECV::Const(cx), ECV::Const(cy), ECV::Const(cz)] => {
-                    Ok(FOP3(FOP3::CONST([*cx, *cy, *cz])))
+                    Ok(F3op(F3op::CONST([*cx, *cy, *cz])))
                 }
                 &[x, y] => {
-                    let x = x.compile(ast, ex)?.into_arg(ex).try_into()?;
-                    let y = y.compile(ast, ex)?.into_arg(ex).try_into()?;
-                    Ok(FOP2(FOP2::NEW([x, y])))
+                    let x = x.compile(ast, ex)?.into_icv(ex).try_into()?;
+                    let y = y.compile(ast, ex)?.into_icv(ex).try_into()?;
+                    Ok(F2op(F2op::NEW([x, y])))
                 }
                 &[x, y, z] => {
-                    let x = x.compile(ast, ex)?.into_arg(ex).try_into()?;
-                    let y = y.compile(ast, ex)?.into_arg(ex).try_into()?;
-                    let z = z.compile(ast, ex)?.into_arg(ex).try_into()?;
-                    Ok(FOP3(FOP3::NEW([x, y, z])))
+                    let x = x.compile(ast, ex)?.into_icv(ex).try_into()?;
+                    let y = y.compile(ast, ex)?.into_icv(ex).try_into()?;
+                    let z = z.compile(ast, ex)?.into_icv(ex).try_into()?;
+                    Ok(F3op(F3op::NEW([x, y, z])))
                 }
                 _ => Err(Error::InvalidSyntax(
                     "The vector must be 2 to 3 elements long".into(),
@@ -1042,3 +1042,6 @@ impl<M: Module> Compiler<M> for Value {
         }
     }
 }
+
+//
+// trait OP: Compiler + Eval

@@ -1,5 +1,5 @@
 use crate::float::*;
-use crate::op::ARG;
+use crate::op::ICV;
 
 pub struct Expression<'m, M: Module> {
     module: &'m M,
@@ -35,11 +35,11 @@ pub trait Module: Sized {
     type CTX: Context;
     type OP: Eval<Self::CTX>;
 
-    fn dispatch_var(&self, _name: &str) -> Option<&ARG> {
+    fn dispatch_var(&self, _name: &str) -> Option<&ICV> {
         None
     }
 
-    fn dispatch_fn(&self, _name: &str, _args: &[ARG]) -> Option<Self::OP> {
+    fn dispatch_fn(&self, _name: &str, _args: &[ICV]) -> Option<Self::OP> {
         None
     }
 }

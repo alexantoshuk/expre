@@ -25,22 +25,22 @@ pub enum Type {
 //     #[inline]
 //     fn from(value: Adress) -> Self {
 //         match value {
-//             Adress::F(i) => FOP(FOP::VAR(LOCAL(i))),
-//             Adress::F2(i) => FOP2(FOP2::VAR(LOCAL(i))),
-//             Adress::F3(i) => FOP3(FOP3::VAR(LOCAL(i))),
+//             Adress::F(i) => Fop(Fop::VAR(LOCAL(i))),
+//             Adress::F2(i) => F2op(F2op::VAR(LOCAL(i))),
+//             Adress::F3(i) => F3op(F3op::VAR(LOCAL(i))),
 //         }
 //     }
 // }
 
 #[derive(Debug, Clone)]
-pub enum ARG {
+pub enum ICV {
     F(F),
     F2(F2),
     F3(F3),
     B(B),
 }
 
-impl ARG {
+impl ICV {
     #[inline]
     pub fn optype(&self) -> Type {
         match self {
@@ -70,104 +70,97 @@ impl ARG {
     }
 }
 
-pub(crate) use crate::op::ARG::*;
+pub(crate) use crate::op::ICV::*;
 
-impl From<ARG> for OP {
-    fn from(value: ARG) -> Self {
+impl From<ICV> for OP {
+    fn from(value: ICV) -> Self {
         match value {
-            F(F::CONST(c)) => FOP(FOP::CONST(c)),
-            F(F::VAR(v)) => FOP(FOP::VAR(v)),
-            F(F::I(i)) => FOP(FOP::I(i)),
+            F(F::CONST(c)) => Fop(Fop::CONST(c)),
+            F(F::VAR(v)) => Fop(Fop::VAR(v)),
+            F(F::I(i)) => Fop(Fop::I(i)),
 
-            F2(F2::CONST(c)) => FOP2(FOP2::CONST(c)),
-            F2(F2::VAR(v)) => FOP2(FOP2::VAR(v)),
-            F2(F2::I(i)) => FOP2(FOP2::I(i)),
+            F2(F2::CONST(c)) => F2op(F2op::CONST(c)),
+            F2(F2::VAR(v)) => F2op(F2op::VAR(v)),
+            F2(F2::I(i)) => F2op(F2op::I(i)),
 
-            F3(F3::CONST(c)) => FOP3(FOP3::CONST(c)),
-            F3(F3::VAR(v)) => FOP3(FOP3::VAR(v)),
-            F3(F3::I(i)) => FOP3(FOP3::I(i)),
+            F3(F3::CONST(c)) => F3op(F3op::CONST(c)),
+            F3(F3::VAR(v)) => F3op(F3op::VAR(v)),
+            F3(F3::I(i)) => F3op(F3op::I(i)),
 
-            B(B::CONST(c)) => BOP(BOP::CONST(c)),
-            B(B::VAR(v)) => FOP(FOP::VAR(v)),
-            B(B::I(i)) => FOP(FOP::I(i)),
+            B(B::CONST(c)) => Bop(Bop::CONST(c)),
+            B(B::VAR(v)) => Fop(Fop::VAR(v)),
+            B(B::I(i)) => Fop(Fop::I(i)),
 
             _ => unreachable!(),
         }
     }
 }
-impl TryFrom<ARG> for F {
+impl TryFrom<ICV> for F {
     type Error = Error;
     #[inline]
-    fn try_from(value: ARG) -> Result<Self, Self::Error> {
+    fn try_from(value: ICV) -> Result<Self, Self::Error> {
         match value {
-            ARG::F(f) => Ok(f),
-            ARG::B(b) => Ok(b.into()),
+            ICV::F(f) => Ok(f),
+            ICV::B(b) => Ok(b.into()),
             _ => Err(Error::Undefined("!!!!".into())),
         }
     }
 }
 
-impl TryFrom<&ARG> for F {
+impl TryFrom<&ICV> for F {
     type Error = Error;
     #[inline]
-    fn try_from(value: &ARG) -> Result<Self, Self::Error> {
+    fn try_from(value: &ICV) -> Result<Self, Self::Error> {
         match value {
-            ARG::F(f) => Ok(*f),
-            ARG::B(b) => Ok((*b).into()),
+            ICV::F(f) => Ok(*f),
+            ICV::B(b) => Ok((*b).into()),
             _ => Err(Error::Undefined("!!!!".into())),
         }
     }
 }
 
-impl TryFrom<ARG> for B {
+impl TryFrom<ICV> for B {
     type Error = Error;
     #[inline]
-    fn try_from(value: ARG) -> Result<Self, Self::Error> {
+    fn try_from(value: ICV) -> Result<Self, Self::Error> {
         match value {
-            ARG::B(b) => Ok(b),
-            ARG::F(f) => Ok(f.into()),
+            ICV::B(b) => Ok(b),
+            ICV::F(f) => Ok(f.into()),
             _ => Err(Error::Undefined("!!!!".into())),
         }
     }
 }
-impl TryFrom<&ARG> for B {
+impl TryFrom<&ICV> for B {
     type Error = Error;
     #[inline]
-    fn try_from(value: &ARG) -> Result<Self, Self::Error> {
+    fn try_from(value: &ICV) -> Result<Self, Self::Error> {
         match value {
-            ARG::B(b) => Ok(*b),
-            ARG::F(f) => Ok((*f).into()),
+            ICV::B(b) => Ok(*b),
+            ICV::F(f) => Ok((*f).into()),
             _ => Err(Error::Undefined("!!!!".into())),
         }
     }
 }
 
-impl From<B> for ARG {
+impl From<B> for ICV {
     #[inline]
     fn from(value: B) -> Self {
         Self::B(value)
     }
 }
 
-impl From<F> for ARG {
+impl From<F> for ICV {
     #[inline]
     fn from(value: F) -> Self {
         Self::F(value)
     }
 }
 
-#[derive(Debug, Clone, Copy, PartialEq, Eq, PartialOrd, Ord, Hash)]
-pub enum VAR {
-    LOCAL(usize),
-    GLOBAL(usize),
-}
-pub(crate) use crate::op::VAR::*;
-
 #[derive(Clone, Copy, PartialEq, Eq, PartialOrd, Ord, Hash)]
 pub enum B {
     I(usize),
     CONST(bool),
-    VAR(VAR),
+    VAR(usize),
 }
 
 impl Default for B {
@@ -200,7 +193,7 @@ impl Debug for B {
 pub enum F {
     I(usize),
     CONST(f64),
-    VAR(VAR),
+    VAR(usize),
 }
 
 impl From<B> for F {
@@ -275,17 +268,17 @@ impl Debug for F {
 
 #[derive(Debug, Clone)]
 pub enum OP {
-    BOP(BOP),
-    FOP(FOP),
-    FOP2(FOP2),
-    FOP3(FOP3),
+    Bop(Bop),
+    Fop(Fop),
+    F2op(F2op),
+    F3op(F3op),
 }
 
 pub(crate) use crate::op::OP::*;
 
 impl Default for OP {
     fn default() -> Self {
-        FOP(FOP::default())
+        Fop(Fop::default())
     }
 }
 
@@ -293,25 +286,25 @@ impl OP {
     #[inline]
     pub fn optype(&self) -> Type {
         match self {
-            Self::BOP(_) => Type::B,
-            Self::FOP(_) => Type::F,
-            Self::FOP2(_) => Type::F2,
-            Self::FOP3(_) => Type::F3,
+            Self::Bop(_) => Type::B,
+            Self::Fop(_) => Type::F,
+            Self::F2op(_) => Type::F2,
+            Self::F3op(_) => Type::F3,
         }
     }
 
     #[inline]
     fn order_with_const(&self) -> u32 {
         match self {
-            Self::BOP(BOP::CONST(_)) => 0,
-            Self::FOP(FOP::CONST(_)) => 1,
-            Self::FOP2(FOP2::CONST(_)) => 2,
-            Self::FOP3(FOP3::CONST(_)) => 3,
+            Self::Bop(Bop::CONST(_)) => 0,
+            Self::Fop(Fop::CONST(_)) => 1,
+            Self::F2op(F2op::CONST(_)) => 2,
+            Self::F3op(F3op::CONST(_)) => 3,
 
-            Self::BOP(_) => 10,
-            Self::FOP(_) => 11,
-            Self::FOP2(_) => 12,
-            Self::FOP3(_) => 13,
+            Self::Bop(_) => 10,
+            Self::Fop(_) => 11,
+            Self::F2op(_) => 12,
+            Self::F3op(_) => 13,
         }
     }
 
@@ -321,10 +314,10 @@ impl OP {
     //     FN: FnOnce(usize) -> usize + Copy,
     // {
     //     match self {
-    //         Self::FOP(instr) => {
+    //         Self::Fop(instr) => {
     //             instr.update_i(f);
     //         }
-    //         Self::FOP2(instr) => {
+    //         Self::F2op(instr) => {
     //             instr.update_i(f);
     //         }
     //     }
@@ -332,15 +325,15 @@ impl OP {
 }
 
 ///////////////////////////////////////////////////////////////////////////////////////////////////////////////////
-/// OPS that return bool type aka BOP
+/// OPS that return bool type aka Bop
 ///////////////////////////////////////////////////////////////////////////////////////////////////////////////////
 
 #[derive(Debug, Clone)]
-pub enum BOP {
+pub enum Bop {
     I(usize),
     //---- Primitive Value Types:
     CONST(bool),
-    STORE(usize, usize),
+    // STORE(usize, usize),
     //---- Unary Ops:
     NOT(B),
 
@@ -365,23 +358,23 @@ pub enum BOP {
     IF(B, B, B),
 }
 
-impl Default for BOP {
+impl Default for Bop {
     fn default() -> Self {
         Self::CONST(false)
     }
 }
 
 ///////////////////////////////////////////////////////////////////////////////////////////////////////////////////
-/// OPS that return scalar T type aka FOP
+/// OPS that return scalar T type aka Fop
 ///////////////////////////////////////////////////////////////////////////////////////////////////////////////////
 
 #[derive(Debug, Clone, PartialEq)]
-pub enum FOP {
+pub enum Fop {
     I(usize),
     //---- Primitive Value Types:
     CONST(f64),
-    VAR(VAR),
-    STORE(usize, usize),
+    VAR(usize),
+    // STORE(usize, usize),
 
     // F2COMP(F2, F),
     // F3COMP(F3, F),
@@ -400,30 +393,30 @@ pub enum FOP {
 
     //---- Functions:
     IF(B, F, F),
-    STDFN(STDFN),
+    FN(Ffn),
 }
 
-impl Default for FOP {
+impl Default for Fop {
     fn default() -> Self {
         Self::CONST(Default::default())
     }
 }
 
 ///////////////////////////////////////////////////////////////////////////////////////////////////////////////////
-/// OPS that return [T;2] type aka FOP2
+/// OPS that return [T;2] type aka F2op
 ///////////////////////////////////////////////////////////////////////////////////////////////////////////////////
 
 macro_rules! make_array_FOP {
-    ($N: literal, $ARG: ident, $OP: ident, $FN: ident) => {
+    ($N: literal, $ICV: ident, $OP: ident, $FN: ident) => {
         #[derive(Clone, Copy, Enum)]
-        pub enum $ARG {
+        pub enum $ICV {
             I(usize),
             CONST([f64; $N]),
-            VAR(VAR),
+            VAR(usize),
             F(F),
         }
 
-        impl PartialEq for $ARG {
+        impl PartialEq for $ICV {
             #[inline]
             fn eq(&self, other: &Self) -> bool {
                 match (self, other) {
@@ -435,8 +428,8 @@ macro_rules! make_array_FOP {
                 }
             }
         }
-        impl Eq for $ARG {}
-        impl Ord for $ARG {
+        impl Eq for $ICV {}
+        impl Ord for $ICV {
             #[inline]
             fn cmp(&self, other: &Self) -> std::cmp::Ordering {
                 match (self, other) {
@@ -449,14 +442,14 @@ macro_rules! make_array_FOP {
             }
         }
 
-        impl PartialOrd for $ARG {
+        impl PartialOrd for $ICV {
             #[inline]
             fn partial_cmp(&self, other: &Self) -> Option<Ordering> {
                 Some(self.cmp(other))
             }
         }
 
-        impl Hash for $ARG {
+        impl Hash for $ICV {
             #[inline]
             fn hash<H: Hasher>(&self, state: &mut H) {
                 self.discriminant().hash(state);
@@ -469,27 +462,27 @@ macro_rules! make_array_FOP {
             }
         }
 
-        impl Default for $ARG {
+        impl Default for $ICV {
             fn default() -> Self {
                 Self::CONST(Default::default())
             }
         }
 
-        impl From<[f64; $N]> for $ARG {
+        impl From<[f64; $N]> for $ICV {
             #[inline]
             fn from(value: [f64; $N]) -> Self {
                 Self::CONST(value)
             }
         }
 
-        impl From<f64> for $ARG {
+        impl From<f64> for $ICV {
             #[inline]
             fn from(value: f64) -> Self {
                 Self::CONST([value; $N])
             }
         }
 
-        impl From<F> for $ARG {
+        impl From<F> for $ICV {
             #[inline]
             fn from(value: F) -> Self {
                 match value {
@@ -499,46 +492,46 @@ macro_rules! make_array_FOP {
             }
         }
 
-        impl From<B> for $ARG {
+        impl From<B> for $ICV {
             #[inline]
             fn from(value: B) -> Self {
                 F::from(value).into()
             }
         }
 
-        impl From<$ARG> for ARG {
+        impl From<$ICV> for ICV {
             #[inline]
-            fn from(value: $ARG) -> Self {
-                Self::$ARG(value)
+            fn from(value: $ICV) -> Self {
+                Self::$ICV(value)
             }
         }
 
-        impl TryFrom<ARG> for $ARG {
+        impl TryFrom<ICV> for $ICV {
             type Error = Error;
             #[inline]
-            fn try_from(value: ARG) -> Result<Self, Self::Error> {
+            fn try_from(value: ICV) -> Result<Self, Self::Error> {
                 match value {
-                    ARG::$ARG(ff) => Ok(ff),
-                    ARG::F(f) => Ok(f.into()),
-                    ARG::B(b) => Ok(b.into()),
+                    ICV::$ICV(ff) => Ok(ff),
+                    ICV::F(f) => Ok(f.into()),
+                    ICV::B(b) => Ok(b.into()),
                     _ => Err(Error::Undefined("!!!!".into())),
                 }
             }
         }
-        impl TryFrom<&ARG> for $ARG {
+        impl TryFrom<&ICV> for $ICV {
             type Error = Error;
             #[inline]
-            fn try_from(value: &ARG) -> Result<Self, Self::Error> {
+            fn try_from(value: &ICV) -> Result<Self, Self::Error> {
                 match value {
-                    ARG::$ARG(ff) => Ok(*ff),
-                    ARG::F(f) => Ok((*f).into()),
-                    ARG::B(b) => Ok((*b).into()),
+                    ICV::$ICV(ff) => Ok(*ff),
+                    ICV::F(f) => Ok((*f).into()),
+                    ICV::B(b) => Ok((*b).into()),
                     _ => Err(Error::Undefined("!!!!".into())),
                 }
             }
         }
 
-        impl Debug for $ARG {
+        impl Debug for $ICV {
             fn fmt(&self, f: &mut fmt::Formatter) -> Result<(), fmt::Error> {
                 match self {
                     Self::I(i) => write!(f, "@{}", i),
@@ -552,28 +545,29 @@ macro_rules! make_array_FOP {
         #[derive(Debug, Clone)]
         pub enum $OP {
             I(usize),
+
             //---- Primitive Value Types:
             CONST([f64; $N]),
-            VAR(VAR),
+            VAR(usize),
             NEW([F; $N]),
-            STORE(usize, usize),
+            // STORE(usize, usize),
 
             //---- Unary Ops:
-            NEG($ARG),
-            INV($ARG),
+            NEG($ICV),
+            INV($ICV),
 
             //---- Binary Math Ops:
-            ADD($ARG, $ARG),
+            ADD($ICV, $ICV),
 
             // A Sub(x) is converted to an FADD(FNEG(x)).
-            MUL($ARG, $ARG),
+            MUL($ICV, $ICV),
             // A Div(n,d) is converted to a FMUL(n,FINV(d)).
-            REM($ARG, $ARG),
-            POW($ARG, $ARG),
+            REM($ICV, $ICV),
+            POW($ICV, $ICV),
 
             //---- Functions:
-            IF(B, $ARG, $ARG),
-            STDFN($FN),
+            IF(B, $ICV, $ICV),
+            FN($FN),
         }
 
         impl Default for $OP {
@@ -584,8 +578,8 @@ macro_rules! make_array_FOP {
     };
 }
 
-make_array_FOP!(2, F2, FOP2, STDFN2);
-make_array_FOP!(3, F3, FOP3, STDFN3);
+make_array_FOP!(2, F2, F2op, F2fn);
+make_array_FOP!(3, F3, F3op, F3fn);
 
 #[inline(always)]
 fn _hash<T: Hash>(obj: T) -> u64 {
